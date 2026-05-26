@@ -255,28 +255,78 @@ function normStatus(s) {
 let SPRINTS = {}; // { list_id: { id, name, short } }
 let allTasks = [];
 let tasksById = {};
-// Historial de asignaciones: { task_id: [dev_id, dev_id, ...] } unión histórica
-let HIST = {};
-const HIST_KEY = 'panel-devs-assignment-history-v1';
+// Estado persistido en Cloudflare KV
+// {
+//   anchor_ms: timestamp de cuando se activó el tracking (medimos a partir de aquí),
+//   weeks: { "2026-05-25": { task_id: { devs:[...], first_seen_ms, last_status } }, ... }
+// }
+let STATE = { anchor_ms: null, weeks: {} };
 
-function loadHist() {
-  try { HIST = JSON.parse(localStorage.getItem(HIST_KEY) || '{}'); } catch (e) { HIST = {}; }
+function weekKeyOf(d) {
+  const s = startOfWeek(d);
+  return `${s.getFullYear()}-${String(s.getMonth()+1).padStart(2,'0')}-${String(s.getDate()).padStart(2,'0')}`;
 }
-function saveHist() {
-  try { localStorage.setItem(HIST_KEY, JSON.stringify(HIST)); } catch (e) {}
+
+async function loadHist() {
+  try {
+    const r = await fetch(`${PROXY}/api/state/devs_weekly_hist`);
+    const data = await r.json();
+    if (data && typeof data === 'object') {
+      STATE = { anchor_ms: data.anchor_ms || null, weeks: data.weeks || {} };
+    }
+  } catch (e) { console.warn('No se pudo cargar histórico KV:', e); }
+  // Si nunca se inicializó, anchor = ahora
+  if (!STATE.anchor_ms) {
+    STATE.anchor_ms = Date.now();
+    await saveHist();
+  }
 }
-// Actualiza HIST con los assignees actuales de cada tarea (unión histórica)
-function updateHist(tasks) {
+async function saveHist() {
+  try {
+    await fetch(`${PROXY}/api/state/devs_weekly_hist`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(STATE)
+    });
+  } catch (e) { console.warn('No se pudo guardar histórico KV:', e); }
+}
+
+// Snapshot: registra tareas asignadas a Mati/Tiago/Nacho con date_updated >= anchor (medimos a partir del anchor)
+function snapshotThisWeek(tasks) {
+  const anchor = STATE.anchor_ms || Date.now();
+  const wk = weekKeyOf(new Date());
+  if (!STATE.weeks[wk]) STATE.weeks[wk] = {};
   let changed = false;
   for (const t of tasks) {
+    const upd = t.date_updated || 0;
+    if (upd < anchor) continue; // no medimos lo previo al anchor
+    const wkOfTask = weekKeyOf(new Date(upd));
+    if (wkOfTask !== wk) continue; // solo registramos en la semana en curso
     const devsHere = t.assignees.filter(a => DEV_IDS.includes(a));
     if (!devsHere.length) continue;
-    const prev = HIST[t.id] || [];
-    const merged = Array.from(new Set([...prev, ...devsHere]));
-    if (merged.length !== prev.length) { HIST[t.id] = merged; changed = true; }
+    const prev = STATE.weeks[wk][t.id];
+    const prevDevs = prev?.devs || [];
+    const merged = Array.from(new Set([...prevDevs, ...devsHere]));
+    if (!prev || merged.length !== prevDevs.length || prev.last_status !== t.status) {
+      STATE.weeks[wk][t.id] = {
+        devs: merged,
+        first_seen_ms: prev?.first_seen_ms || Date.now(),
+        last_status: t.status
+      };
+      changed = true;
+    }
   }
   if (changed) saveHist();
 }
+
+// Helpers para vistas
+function trackedThisWeek(devId) {
+  const wk = weekKeyOf(new Date());
+  const entries = STATE.weeks[wk] || {};
+  const ids = Object.keys(entries).filter(id => (entries[id].devs || []).includes(devId));
+  return ids.map(id => ({ task: tasksById[id], entry: entries[id] })).filter(x => x.task);
+}
+const QA_STATUSES = new Set(['listo para qa','waiting qa','terminado','done','cerrado','closed']);
 let currentTab = 'kanban';
 let currentSprint = 'all';
 let currentView = 'active';
@@ -836,46 +886,68 @@ function renderKanban() {
 }
 
 function renderWeekly() {
-  const start = startOfWeek(new Date()).getTime();
-  const end = start + 7*86400000;
-  const inWeek = t => t.date_updated >= start && t.date_updated < end;
-  const tasksW = filteredTasks().filter(inWeek);
+  const wk = weekKeyOf(new Date());
+  const anchor = STATE.anchor_ms;
+  const anchorDate = anchor ? new Date(anchor) : null;
 
-  // Pool principal: solo asignados (evita inflar por watchers en bulk-updates)
-  let html = `<div class="kpis">`;
+  // KPIs: por cada dev, traer tareas trackeadas esta semana + las que llegaron a Listo QA / Terminado
+  let html = '';
+  html += `<div style="background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:12px; color:var(--text-muted);">
+    📌 Tracking activo desde <b style="color:var(--text)">${anchorDate ? anchorDate.toLocaleString('es-AR') : '—'}</b>.
+    Solo se contabilizan tareas asignadas a Mati/Tiago/Nacho con movimiento esta semana (a partir del anchor).
+  </div>`;
+
+  html += `<div class="kpis">`;
   for (const d of DEVS) {
-    const dt = tasksForDev(d.id, tasksW);
-    const done = dt.filter(t => DONE_STATUSES.includes(t.status));
-    const toQa = dt.filter(t => ['waiting qa','listo para qa'].includes(t.status));
-    const inRev = dt.filter(t => ['review','listo para revision','qa','en revision'].includes(t.status));
+    const tracked = trackedThisWeek(d.id);
+    const inQA = tracked.filter(x => QA_STATUSES.has(x.task.status));
     html += `<div class="kpi">
       <div class="label">${d.name}</div>
-      <div class="value" style="color:${d.color}">${dt.length}</div>
-      <div class="sub">${inRev.length} revisión · ${toQa.length} listo QA · ${done.length} done</div>
+      <div class="value" style="color:${d.color}">${tracked.length}</div>
+      <div class="sub">${inQA.length} llegaron a Listo QA / Terminado</div>
     </div>`;
   }
   html += `</div>`;
 
   html += `<div class="weekly-detail">`;
   for (const d of DEVS) {
-    const dt = tasksForDev(d.id, tasksW).sort((a,b) => b.date_updated - a.date_updated);
+    const tracked = trackedThisWeek(d.id).sort((a,b) => (b.entry.first_seen_ms||0) - (a.entry.first_seen_ms||0));
+    const inQA = tracked.filter(x => QA_STATUSES.has(x.task.status));
+    const inProgress = tracked.filter(x => !QA_STATUSES.has(x.task.status));
     html += `<div class="weekly-dev">
-      <div class="weekly-dev-header"><div class="dev-avatar" style="width:24px;height:24px;font-size:10px;background:${d.color}">${d.short}</div>${d.name} <span style="color:var(--text-muted); font-size:11px; margin-left:auto">${dt.length} mov.</span></div>
+      <div class="weekly-dev-header">
+        <div class="dev-avatar" style="width:24px;height:24px;font-size:10px;background:${d.color}">${d.short}</div>${d.name}
+        <span style="color:var(--text-muted); font-size:11px; margin-left:auto">${tracked.length} asignadas</span>
+      </div>
       <div class="weekly-events">`;
-    if (dt.length === 0) html += `<div class="empty" style="padding:20px 0">Sin movimientos</div>`;
-    for (const t of dt) {
-      const c = STATUS_COLORS[t.status] || '#64748b';
-      const parentInfo = t.parent && tasksById[t.parent] ? ` · ↑ ${escapeHtml(tasksById[t.parent].name.slice(0,40))}` : '';
-      html += `<div class="weekly-event" onclick="openTask('${t.id}')">
-        <span class="ev-status" style="background:${c}22; color:${c}">${t.status}</span>
-        <span class="sprint-pill">${t.sprint_short}</span>
-        <span class="task-name" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(t.name)}${parentInfo}">${escapeHtml(t.name)}${parentInfo}</span>
-      </div>`;
+    if (tracked.length === 0) html += `<div class="empty" style="padding:20px 0">Sin asignaciones esta semana</div>`;
+    if (inQA.length > 0) {
+      html += `<div style="font-size:10px; text-transform:uppercase; color:#22c55e; font-weight:600; margin:4px 0;">✓ Llegaron a Listo QA / Terminado (${inQA.length})</div>`;
+      for (const x of inQA) {
+        const t = x.task;
+        const c = STATUS_COLORS[t.status] || '#22c55e';
+        html += `<div class="weekly-event" onclick="openTask('${t.id}')">
+          <span class="ev-status" style="background:${c}22; color:${c}">${t.status}</span>
+          <span class="sprint-pill">${t.sprint_short}</span>
+          <span class="task-name" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+        </div>`;
+      }
+    }
+    if (inProgress.length > 0) {
+      html += `<div style="font-size:10px; text-transform:uppercase; color:var(--text-muted); font-weight:600; margin:8px 0 4px;">En progreso (${inProgress.length})</div>`;
+      for (const x of inProgress) {
+        const t = x.task;
+        const c = STATUS_COLORS[t.status] || '#64748b';
+        html += `<div class="weekly-event" onclick="openTask('${t.id}')">
+          <span class="ev-status" style="background:${c}22; color:${c}">${t.status}</span>
+          <span class="sprint-pill">${t.sprint_short}</span>
+          <span class="task-name" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+        </div>`;
+      }
     }
     html += `</div></div>`;
   }
   html += `</div>`;
-
   return html;
 }
 
@@ -1054,9 +1126,11 @@ document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () =>
 document.getElementById('sprintFilter').addEventListener('change', e => { currentSprint = e.target.value; render(); });
 document.getElementById('viewFilter').addEventListener('change', e => { currentView = e.target.value; render(); });
 document.getElementById('refreshBtn').addEventListener('click', () => init());
-document.getElementById('resetHistBtn').addEventListener('click', () => {
-  if (confirm('¿Borrar el historial local de asignaciones por dev? Esto quita atribuciones de tareas que ya no están asignadas a su dev original.')) {
-    HIST = {}; saveHist(); render();
+document.getElementById('resetHistBtn').addEventListener('click', async () => {
+  if (confirm('¿Reiniciar el tracking? Borra los snapshots semanales y vuelve a empezar a medir desde HOY en adelante.')) {
+    STATE = { anchor_ms: Date.now(), weeks: {} };
+    await saveHist();
+    render();
   }
 });
 document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
@@ -1092,14 +1166,17 @@ function rebuildSprintFilter() {
 
 async function init() {
   document.getElementById('content').innerHTML = '<div class="loading"><div class="spinner"></div>Cargando datos de ClickUp…</div>';
-  loadHist();
+  await loadHist();
   SPRINTS = await discoverSprints();
   rebuildSprintFilter();
   allTasks = await fetchAllTasks();
   tasksById = {};
   for (const t of allTasks) tasksById[t.id] = t;
-  updateHist(allTasks);
-  document.getElementById('lastUpdated').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-AR') + ` · ${Object.keys(SPRINTS).length} sprints · ${allTasks.length} tareas · ${Object.keys(HIST).length} en histórico`;
+  snapshotThisWeek(allTasks);
+  const anchorTxt = STATE.anchor_ms ? new Date(STATE.anchor_ms).toLocaleDateString('es-AR') : '—';
+  const wk = weekKeyOf(new Date());
+  const tracked = Object.keys(STATE.weeks[wk] || {}).length;
+  document.getElementById('lastUpdated').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-AR') + ` · ${allTasks.length} tareas · anchor ${anchorTxt} · ${tracked} trackeadas`;
   document.getElementById('weekLabel').textContent = weekLabel(new Date());
   render();
 }
