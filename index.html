@@ -123,9 +123,9 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
 .modal-link:hover { text-decoration:underline; }
 
 /* Big totalizers (estilo panel-modulo-contable) */
-.totalizers { display:grid; grid-template-columns:repeat(6, 1fr); gap:12px; padding:16px 24px 0; }
-@media (max-width:1200px) { .totalizers { grid-template-columns:repeat(3, 1fr); } }
-@media (max-width:700px) { .totalizers { grid-template-columns:repeat(2, 1fr); } }
+.totalizers { display:grid; grid-template-columns:repeat(7, 1fr); gap:10px; padding:16px 24px 0; }
+@media (max-width:1400px) { .totalizers { grid-template-columns:repeat(4, 1fr); } }
+@media (max-width:900px) { .totalizers { grid-template-columns:repeat(2, 1fr); } }
 .tot-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; }
 .tot-card .tot-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; display:flex; align-items:center; gap:6px; }
 .tot-card .tot-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
@@ -436,20 +436,28 @@ function renderTotalizers() {
   const inStep = (taskArr, stepKey) => taskArr.filter(t => FLOW.find(f => f.key === stepKey).statuses.includes(t.status));
   const inDone = (taskArr) => taskArr.filter(t => DONE_STATUSES.includes(t.status));
 
-  // 5 buckets
+  // Backlog disponible (sin asignar) total
+  const unassigned = unassignedParents(tasks);
+
+  // 7 buckets
   const buckets = [
-    { key:'all', label:'Total trabajo', color:'#e4e6ef', filter:t=>true },
+    { key:'all', label:'Total trabajo asignado', color:'#e4e6ef', filter:t=>true },
     { key:'pending', label:'Por hacer', color:'#94a3b8' },
     { key:'dev', label:'En curso', color:'#3b82f6' },
     { key:'review_ready', label:'Listo en revisión', color:'#a855f7' },
     { key:'review', label:'En revisión', color:'#f59e0b' },
-    { key:'qa_ready', label:'Listo QA', color:'#22c55e' }
+    { key:'qa_ready', label:'Listo QA', color:'#22c55e' },
+    { key:'backlog', label:'Disponible para tomar', color:'#ec4899' }
   ];
 
   let html = '';
   for (const b of buckets) {
     let p, s;
     if (b.key === 'all') { p = allP.length; s = allS.length; }
+    else if (b.key === 'backlog') {
+      p = unassigned.length;
+      s = 0;
+    }
     else {
       p = inStep(allP, b.key).length;
       s = inStep(allS, b.key).length;
@@ -564,9 +572,52 @@ function renderTaskNode(node, devId) {
   return h;
 }
 
+// Padres sin asignar (backlog disponible para tomar) en cada estado del flujo
+function unassignedParents(tasks) {
+  return (tasks || filteredTasks()).filter(t => !t.parent && (!t.assignees || t.assignees.length === 0));
+}
+
+function renderBacklog(tasks) {
+  const unassigned = unassignedParents(tasks);
+  if (!unassigned.length) return '';
+  // Agrupar por step de flujo
+  const groups = FLOW.map(step => ({
+    step,
+    items: unassigned.filter(t => step.statuses.includes(t.status))
+  })).filter(g => g.items.length > 0);
+  if (!groups.length) return '';
+
+  let html = `<div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:20px;">
+    <div style="font-size:14px; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+      📥 Backlog disponible (sin asignar)
+      <span style="font-size:11px; color:var(--text-muted); font-weight:400;">— tareas que cualquier dev puede tomar</span>
+      <span style="margin-left:auto; font-size:12px; background:var(--bg); padding:3px 10px; border-radius:10px;">${unassigned.length}</span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(${groups.length}, 1fr); gap:10px;">`;
+  for (const g of groups) {
+    html += `<div style="background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px;">
+      <div style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted); display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:${g.step.color}"></span>${g.step.label}
+        <span style="margin-left:auto; color:var(--text); background:var(--bg); padding:1px 8px; border-radius:8px; font-size:11px;">${g.items.length}</span>
+      </div>`;
+    for (const t of g.items) {
+      const days = t.date_updated ? Math.floor((Date.now() - t.date_updated)/86400000) : '?';
+      html += `<div class="task-row" style="background:var(--bg); margin-bottom:4px; border-radius:5px;" onclick="openTask('${t.id}')">
+        <span class="sprint-pill">${t.sprint_short}</span>
+        <span class="task-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+        <span class="task-days">${days}d</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  html += `</div></div>`;
+  return html;
+}
+
 function renderKanban() {
   const tasks = filteredTasks();
-  let html = '<div class="kpis">';
+  let html = renderBacklog(tasks);
+  html += '<div class="kpis">';
   for (const d of DEVS) {
     const parents = devParents(d.id, tasks);
     const parentsInFlow = parents.filter(t => FLOW.some(f => f.statuses.includes(t.status)));
