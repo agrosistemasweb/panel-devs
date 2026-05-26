@@ -158,6 +158,9 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
   </div>
 </div>
 
+<!-- Banner cuando hay semana seleccionada -->
+<div id="weekBanner" style="display:none; padding:10px 24px; background:var(--surface2); border-bottom:1px solid var(--border); font-size:13px; align-items:center; gap:8px;"></div>
+
 <!-- Totalizadores grandes ancho completo -->
 <div class="totalizers" id="totalizers"></div>
 <div class="progress-bar" id="progressBar"></div>
@@ -448,6 +451,10 @@ function filteredTasks() {
     if (currentSprint !== 'all' && t.list_id !== currentSprint) return false;
     if (currentView === 'active' && DONE_STATUSES.includes(t.status)) return false;
     if (currentCutoff && t.date_created && t.date_created > currentCutoff) return false;
+    if (selectedWeek !== null) {
+      const end = selectedWeek + 7*86400000;
+      if (!(t.date_updated >= selectedWeek && t.date_updated < end)) return false;
+    }
     return true;
   });
 }
@@ -535,6 +542,17 @@ function render() {
 // ============================================================
 function renderTotalizers() {
   const tasks = filteredTasks();
+  // Banner si hay semana seleccionada
+  const wkBanner = document.getElementById('weekBanner');
+  if (selectedWeek !== null && wkBanner) {
+    const s = new Date(selectedWeek);
+    const e = new Date(selectedWeek + 6*86400000);
+    const fmt = x => `${String(x.getDate()).padStart(2,'0')}/${String(x.getMonth()+1).padStart(2,'0')}`;
+    wkBanner.style.display = 'flex';
+    wkBanner.innerHTML = `📅 Mostrando tareas movidas en semana <b>${fmt(s)}–${fmt(e)}</b> · totalizadores y kanban filtrados <button class="btn" style="margin-left:auto" onclick="selectWeek(null)">✕ Limpiar</button>`;
+  } else if (wkBanner) {
+    wkBanner.style.display = 'none';
+  }
   // Para totalizadores: incluyo tareas asociadas a los 3 devs (padres asignados + subtareas dentro de esos padres)
   let allParents = [];
   for (const d of DEVS) allParents = allParents.concat(devParents(d.id, tasks));
@@ -1030,7 +1048,8 @@ function renderHistory() {
   }
   html += `</div></div>`;
 
-  html += `<h2 style="margin-top:24px">Tareas finalizadas (done/closed) por semana</h2>
+  html += `<h2 style="margin-top:24px">Movimientos / Finalizadas por semana</h2>
+    <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">Cada celda: <b>movidas</b> / <b style="color:var(--success)">done</b></div>
     <div style="overflow-x:auto; margin-top:10px;">
     <table style="width:100%; border-collapse:collapse; font-size:13px;">
     <thead><tr style="background:var(--surface2)">
@@ -1038,15 +1057,16 @@ function renderHistory() {
   for (const d of DEVS) html += `<th style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border); color:${d.color}">${d.short}</th>`;
   html += `<th style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border)">Total</th></tr></thead><tbody>`;
   for (const wd of [...dataByWeek].reverse()) {
-    let total = 0;
+    let totalM = 0, totalD = 0;
     const isSel = selectedWeek === wd.start;
     html += `<tr onclick="selectWeek(${wd.start})" style="cursor:pointer; ${isSel?'background:var(--surface2)':''}"><td style="padding:8px 10px; border-bottom:1px solid var(--border); ${wd.current?'color:var(--accent); font-weight:600':''} ${isSel?'color:var(--accent); font-weight:700':''}">${wd.label}${wd.current?' (actual)':''}</td>`;
     for (const d of DEVS) {
+      const m = wd.perDev[d.id].moved;
       const v = wd.perDev[d.id].done;
-      total += v;
-      html += `<td style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border)">${v}</td>`;
+      totalM += m; totalD += v;
+      html += `<td style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border)"><b>${m}</b> <span style="color:var(--text-muted)">/</span> <b style="color:var(--success)">${v}</b></td>`;
     }
-    html += `<td style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border); font-weight:600">${total}</td></tr>`;
+    html += `<td style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border); font-weight:600"><b>${totalM}</b> <span style="color:var(--text-muted)">/</span> <b style="color:var(--success)">${totalD}</b></td></tr>`;
   }
   html += `</tbody></table></div></div>`;
 
