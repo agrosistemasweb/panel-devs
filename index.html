@@ -324,19 +324,32 @@ function filteredTasks() {
   });
 }
 
-function tasksForDev(devId, tasks) {
-  return (tasks || filteredTasks()).filter(t => t.assignees.includes(devId));
+// Padres asignados al dev (filtrados por sprint/vista)
+function devParents(devId, tasks) {
+  return (tasks || filteredTasks()).filter(t => !t.parent && t.assignees.includes(devId));
 }
 
-// Cuenta P (padres) y S (subtareas) en un array de tasks
-function countPS(tasks) {
-  let p=0, s=0;
-  for (const t of tasks) { if (t.parent) s++; else p++; }
-  return { p, s, total: p+s };
+// Subtareas que viven DENTRO de los padres del dev (sin importar quién la tenga asignada)
+// Respeta el filtro de vista (Activas/Todas) sobre la subtarea
+function devSubs(parents, tasks) {
+  const pids = new Set(parents.map(p => p.id));
+  const pool = tasks || filteredTasks();
+  return pool.filter(t => t.parent && pids.has(t.parent));
 }
-function psBadge(tasks) {
-  const c = countPS(tasks);
+
+// Cuenta P/S dado un set de padres
+function countPS(parents, tasks) {
+  const subs = devSubs(parents, tasks);
+  return { p: parents.length, s: subs.length, total: parents.length + subs.length, subs };
+}
+function psBadge(parents, tasks) {
+  const c = countPS(parents, tasks);
   return `<span class="ps-inline"><span class="ps-mini"><span style="color:var(--text-muted)">P</span> <b>${c.p}</b></span><span class="ps-mini"><span style="color:var(--text-muted)">S</span> <b>${c.s}</b></span></span>`;
+}
+
+// Compatibilidad: si en algún lado llaman tasksForDev (esta semana / histórico)
+function tasksForDev(devId, tasks) {
+  return (tasks || filteredTasks()).filter(t => t.assignees.includes(devId));
 }
 
 // Devuelve nodos { task, subtasks: [task,...] }
@@ -429,37 +442,40 @@ function renderKanban() {
   const tasks = filteredTasks();
   let html = '<div class="kpis">';
   for (const d of DEVS) {
-    const dt = tasksForDev(d.id, tasks);
-    const inFlow = dt.filter(t => FLOW.some(f => f.statuses.includes(t.status)));
-    const cFlow = countPS(inFlow);
-    const cTot = countPS(dt);
+    const parents = devParents(d.id, tasks);
+    const parentsInFlow = parents.filter(t => FLOW.some(f => f.statuses.includes(t.status)));
+    const c = countPS(parentsInFlow, tasks);
     html += `<div class="kpi">
       <div class="label">${d.short} · ${d.name}</div>
-      <div class="value" style="color:${d.color}">${cFlow.total}</div>
+      <div class="value" style="color:${d.color}">${c.p}</div>
       <div style="display:flex; gap:6px; margin-top:4px;">
-        <span class="ps-chip"><span class="lbl">P</span> ${cFlow.p}</span>
-        <span class="ps-chip"><span class="lbl">S</span> ${cFlow.s}</span>
+        <span class="ps-chip"><span class="lbl">P</span> ${c.p}</span>
+        <span class="ps-chip"><span class="lbl">S</span> ${c.s}</span>
       </div>
-      <div class="sub" style="margin-top:6px">${cTot.total} totales · P ${cTot.p} / S ${cTot.s}</div>
+      <div class="sub" style="margin-top:6px">${c.total} entre padres y subtareas</div>
     </div>`;
   }
   html += '</div>';
 
   html += '<div class="devs-grid">';
   for (const d of DEVS) {
-    const dt = tasksForDev(d.id, tasks);
-    const cAll = countPS(dt);
+    const parents = devParents(d.id, tasks);
+    const cAll = countPS(parents, tasks);
     html += `<div class="dev-card">
       <div class="dev-header">
         <div class="dev-avatar" style="background:${d.color}">${d.short}</div>
         <div class="dev-name">${d.name}</div>
-        <div class="dev-total">${cAll.total} ${psBadge(dt)}</div>
+        <div class="dev-total">${cAll.p} P / ${cAll.s} S</div>
       </div>
       <div class="dev-flow">`;
     for (const step of FLOW) {
-      const stepTasks = dt.filter(t => step.statuses.includes(t.status));
-      const nodes = buildTree(stepTasks);
-      const cs = countPS(stepTasks);
+      // Padres del dev en este status
+      const stepParents = parents.filter(t => step.statuses.includes(t.status));
+      // Subtareas (de cualquier padre del dev) en este status
+      const allSubs = devSubs(parents, tasks);
+      const stepSubs = allSubs.filter(t => step.statuses.includes(t.status));
+      const nodes = buildTree(stepParents);
+      const cs = { p: stepParents.length, s: stepSubs.length, total: stepParents.length + stepSubs.length };
       html += `<div class="flow-step">
         <div class="flow-step-header" onclick="this.nextElementSibling.classList.toggle('open')">
           <div class="flow-step-name"><span class="status-dot" style="background:${step.color}"></span>${step.label}</div>
