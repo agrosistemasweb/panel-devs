@@ -127,7 +127,9 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
 .totalizers { display:grid; grid-template-columns:repeat(7, 1fr); gap:10px; padding:16px 24px 0; }
 @media (max-width:1400px) { .totalizers { grid-template-columns:repeat(4, 1fr); } }
 @media (max-width:900px) { .totalizers { grid-template-columns:repeat(2, 1fr); } }
-.tot-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; }
+.tot-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; cursor:pointer; transition:all .15s; }
+.tot-card:hover { border-color:var(--accent); transform:translateY(-1px); }
+.tot-card.active { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent); }
 .tot-card .tot-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; display:flex; align-items:center; gap:6px; }
 .tot-card .tot-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .tot-card .tot-value { font-size:34px; font-weight:800; line-height:1; }
@@ -255,7 +257,8 @@ let tasksById = {};
 let currentTab = 'kanban';
 let currentSprint = 'all';
 let currentView = 'active';
-let currentCutoff = null; // timestamp ms o null
+let currentCutoff = null;
+let currentDrillBucket = null; // bucket key seleccionado al clickear un totalizador
 
 // ============================================================
 // FETCH
@@ -468,7 +471,8 @@ function renderTotalizers() {
       s = inStep(allS, b.key).length;
     }
     const total = p + s;
-    html += `<div class="tot-card">
+    const isActive = currentDrillBucket === b.key;
+    html += `<div class="tot-card ${isActive?'active':''}" onclick="toggleDrill('${b.key}')">
       <div class="tot-label"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${b.color}"></span>${b.label}</div>
       <div class="tot-row">
         <div class="tot-value" style="color:${b.color}">${total}</div>
@@ -623,10 +627,113 @@ function renderBlocked(tasks) {
   return html;
 }
 
+// Renderiza el detalle al clickear un totalizador
+function renderDrill(tasks) {
+  const BUCKET_INFO = {
+    all: { label:'Total trabajo', color:'#e4e6ef' },
+    pending: { label:'Por hacer', color:'#94a3b8' },
+    dev: { label:'En curso', color:'#3b82f6' },
+    review_ready: { label:'Listo en revisión', color:'#a855f7' },
+    review: { label:'En revisión', color:'#f59e0b' },
+    qa_ready: { label:'Listo QA', color:'#22c55e' },
+    blocked: { label:'Bloqueadas', color:'#ef4444' }
+  };
+  const info = BUCKET_INFO[currentDrillBucket] || { label:currentDrillBucket, color:'#e4e6ef' };
+
+  // Pool: padres del set DEVS + sus subtareas
+  let allParents = [];
+  for (const d of DEVS) allParents = allParents.concat(devParents(d.id, tasks));
+  const seen = new Set(); const parents = [];
+  for (const p of allParents) if (!seen.has(p.id)) { seen.add(p.id); parents.push(p); }
+  const subs = devSubs(parents, tasks);
+
+  let pool;
+  if (currentDrillBucket === 'all') pool = [...parents, ...subs];
+  else if (currentDrillBucket === 'blocked') pool = blockedParents(tasks);
+  else {
+    const step = FLOW.find(f => f.key === currentDrillBucket);
+    if (!step) pool = [];
+    else pool = [...parents, ...subs].filter(t => step.statuses.includes(t.status));
+  }
+
+  // Agrupar por dev y por sin asignar (para blocked)
+  const groupsByDev = { _un: [] };
+  for (const d of DEVS) groupsByDev[d.id] = [];
+  for (const t of pool) {
+    let placed = false;
+    for (const d of DEVS) {
+      const isDirect = t.assignees.includes(d.id);
+      const isParentOfDev = t.parent && tasks.find(x => x.id === t.parent && x.assignees.includes(d.id));
+      if (isDirect || isParentOfDev) { groupsByDev[d.id].push(t); placed = true; break; }
+    }
+    if (!placed) groupsByDev._un.push(t);
+  }
+
+  let html = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+    <span style="width:14px; height:14px; border-radius:50%; background:${info.color}"></span>
+    <h2 style="font-size:18px; margin:0">${info.label}</h2>
+    <span style="font-size:13px; color:var(--text-muted)">${pool.length} tareas</span>
+    <button class="btn" style="margin-left:auto" onclick="toggleDrill(null)">✕ Limpiar filtro</button>
+  </div>`;
+
+  html += `<div class="devs-grid">`;
+  for (const d of DEVS) {
+    const items = groupsByDev[d.id];
+    html += `<div class="dev-card">
+      <div class="dev-header">
+        <div class="dev-avatar" style="background:${d.color}">${d.short}</div>
+        <div class="dev-name">${d.name}</div>
+        <div class="dev-total">${items.length}</div>
+      </div>
+      <div class="dev-flow" style="padding:8px;">`;
+    if (!items.length) html += `<div style="font-size:11px; color:var(--text-muted); padding:8px;">Sin tareas</div>`;
+    for (const t of items) {
+      const days = t.date_updated ? Math.floor((Date.now() - t.date_updated)/86400000) : '?';
+      const sc = STATUS_COLORS[t.status] || '#64748b';
+      const isSub = !!t.parent;
+      html += `<div class="task-row" style="background:var(--surface2); border-radius:6px; margin-bottom:4px;" onclick="openTask('${t.id}')">
+        <span class="sprint-pill">${t.sprint_short}</span>
+        <span style="font-size:9px; padding:1px 4px; border-radius:3px; background:${isSub?'var(--bg)':'var(--surface)'}; color:var(--text-muted); font-weight:600">${isSub?'S':'P'}</span>
+        <span style="font-size:9px; padding:1px 5px; border-radius:3px; background:${sc}22; color:${sc}; font-weight:600; text-transform:uppercase;">${t.status}</span>
+        <span class="task-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+        <span class="task-days">${days}d</span>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+  html += `</div>`;
+
+  // Sin asignar al final si las hay
+  if (groupsByDev._un.length) {
+    html += `<div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-top:16px;">
+      <div style="font-size:13px; font-weight:600; margin-bottom:10px;">Sin asignar <span style="color:var(--text-muted); font-weight:400; margin-left:6px">${groupsByDev._un.length}</span></div>`;
+    for (const t of groupsByDev._un) {
+      const sc = STATUS_COLORS[t.status] || '#64748b';
+      const days = t.date_updated ? Math.floor((Date.now() - t.date_updated)/86400000) : '?';
+      const asg = (t.assignee_names||[]).join(', ') || '(sin asignar)';
+      html += `<div class="task-row" style="background:var(--surface2); border-radius:6px; margin-bottom:4px;" onclick="openTask('${t.id}')">
+        <span class="sprint-pill">${t.sprint_short}</span>
+        <span style="font-size:9px; padding:1px 5px; border-radius:3px; background:${sc}22; color:${sc}; font-weight:600; text-transform:uppercase;">${t.status}</span>
+        <span class="task-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+        <span style="font-size:10px; color:var(--text-muted);">${escapeHtml(asg)}</span>
+        <span class="task-days">${days}d</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  return html;
+}
+
+function toggleDrill(bucket) {
+  currentDrillBucket = (currentDrillBucket === bucket) ? null : bucket;
+  render();
+}
+
 function renderKanban() {
   const tasks = filteredTasks();
-  let html = renderBlocked(tasks);
-  html += '<div class="kpis">';
+  // Si hay drill activo, mostrar detalle en lugar de kanban completo
+  if (currentDrillBucket) return renderDrill(tasks);
+  let html = '<div class="kpis">';
   for (const d of DEVS) {
     const parents = devParents(d.id, tasks);
     const parentsInFlow = parents.filter(t => FLOW.some(f => f.statuses.includes(t.status)));
