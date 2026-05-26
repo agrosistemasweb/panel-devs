@@ -223,7 +223,7 @@ const DEVS = [
 
 // Aliases: incluye nombres en inglés (S1-S5) + español (S6)
 const FLOW = [
-  { key: 'pending', label: 'Reabierta / Pendiente', statuses: ['to do','a revisar','blocked','pendiente','reabiertas','bloqueado','bloqueado - rev. fun'], color: '#94a3b8' },
+  { key: 'pending', label: 'Reabierta / Pendiente', statuses: ['to do','a revisar','pendiente','reabiertas'], color: '#94a3b8' },
   { key: 'dev', label: 'En curso', statuses: ['in progress','en curso'], color: '#3b82f6' },
   { key: 'review_ready', label: 'Listo en revisión', statuses: ['review','listo para revision'], color: '#a855f7' },
   { key: 'review', label: 'En revisión', statuses: ['qa','en revision'], color: '#f59e0b' },
@@ -436,26 +436,26 @@ function renderTotalizers() {
   const inStep = (taskArr, stepKey) => taskArr.filter(t => FLOW.find(f => f.key === stepKey).statuses.includes(t.status));
   const inDone = (taskArr) => taskArr.filter(t => DONE_STATUSES.includes(t.status));
 
-  // Backlog disponible (sin asignar) total
-  const unassigned = unassignedParents(tasks);
+  // Bloqueadas total (cualquier asignación)
+  const blocked = blockedParents(tasks);
 
   // 7 buckets
   const buckets = [
-    { key:'all', label:'Total trabajo asignado', color:'#e4e6ef', filter:t=>true },
+    { key:'all', label:'Total trabajo', color:'#e4e6ef', filter:t=>true },
     { key:'pending', label:'Por hacer', color:'#94a3b8' },
     { key:'dev', label:'En curso', color:'#3b82f6' },
     { key:'review_ready', label:'Listo en revisión', color:'#a855f7' },
     { key:'review', label:'En revisión', color:'#f59e0b' },
     { key:'qa_ready', label:'Listo QA', color:'#22c55e' },
-    { key:'backlog', label:'Disponible para tomar', color:'#ec4899' }
+    { key:'blocked', label:'Bloqueadas', color:'#ef4444' }
   ];
 
   let html = '';
   for (const b of buckets) {
     let p, s;
     if (b.key === 'all') { p = allP.length; s = allS.length; }
-    else if (b.key === 'backlog') {
-      p = unassigned.length;
+    else if (b.key === 'blocked') {
+      p = blocked.length;
       s = 0;
     }
     else {
@@ -572,43 +572,47 @@ function renderTaskNode(node, devId) {
   return h;
 }
 
-// Padres sin asignar (backlog disponible para tomar) en cada estado del flujo
-function unassignedParents(tasks) {
-  return (tasks || filteredTasks()).filter(t => !t.parent && (!t.assignees || t.assignees.length === 0));
+// Padres bloqueados (estados que no son parte del flujo de trabajo normal)
+const BLOCKED_STATUSES = ['blocked','bloqueado','bloqueado - rev. fun'];
+function blockedParents(tasks) {
+  return (tasks || filteredTasks()).filter(t => !t.parent && BLOCKED_STATUSES.includes(t.status));
 }
 
-function renderBacklog(tasks) {
-  const unassigned = unassignedParents(tasks);
-  if (!unassigned.length) return '';
-  // Agrupar por step de flujo
-  const groups = FLOW.map(step => ({
-    step,
-    items: unassigned.filter(t => step.statuses.includes(t.status))
-  })).filter(g => g.items.length > 0);
-  if (!groups.length) return '';
+function renderBlocked(tasks) {
+  const blocked = blockedParents(tasks);
+  if (!blocked.length) return '';
+
+  // Agrupar por dev asignado (o "sin asignar")
+  const groups = {};
+  for (const t of blocked) {
+    if (t.assignees.length === 0) { (groups['_un'] = groups['_un'] || []).push(t); }
+    else {
+      for (const aid of t.assignees) {
+        const dev = DEVS.find(d => d.id === aid);
+        const key = dev ? dev.id : 'otros';
+        (groups[key] = groups[key] || []).push(t);
+      }
+    }
+  }
 
   let html = `<div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:20px;">
     <div style="font-size:14px; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
-      📥 Backlog disponible (sin asignar)
-      <span style="font-size:11px; color:var(--text-muted); font-weight:400;">— tareas que cualquier dev puede tomar</span>
-      <span style="margin-left:auto; font-size:12px; background:var(--bg); padding:3px 10px; border-radius:10px;">${unassigned.length}</span>
+      🚫 Bloqueadas
+      <span style="font-size:11px; color:var(--text-muted); font-weight:400;">— en revisión funcional o bloqueadas para avanzar</span>
+      <span style="margin-left:auto; font-size:12px; background:var(--bg); padding:3px 10px; border-radius:10px;">${blocked.length}</span>
     </div>
-    <div style="display:grid; grid-template-columns:repeat(${groups.length}, 1fr); gap:10px;">`;
-  for (const g of groups) {
-    html += `<div style="background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px;">
-      <div style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted); display:flex; align-items:center; gap:6px; margin-bottom:8px;">
-        <span style="width:8px;height:8px;border-radius:50%;background:${g.step.color}"></span>${g.step.label}
-        <span style="margin-left:auto; color:var(--text); background:var(--bg); padding:1px 8px; border-radius:8px; font-size:11px;">${g.items.length}</span>
-      </div>`;
-    for (const t of g.items) {
-      const days = t.date_updated ? Math.floor((Date.now() - t.date_updated)/86400000) : '?';
-      html += `<div class="task-row" style="background:var(--bg); margin-bottom:4px; border-radius:5px;" onclick="openTask('${t.id}')">
-        <span class="sprint-pill">${t.sprint_short}</span>
-        <span class="task-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
-        <span class="task-days">${days}d</span>
-      </div>`;
-    }
-    html += `</div>`;
+    <div style="display:flex; flex-direction:column; gap:6px;">`;
+  for (const t of blocked) {
+    const days = t.date_updated ? Math.floor((Date.now() - t.date_updated)/86400000) : '?';
+    const sc = STATUS_COLORS[t.status] || '#ef4444';
+    const asg = (t.assignee_names || []).join(', ') || '(sin asignar)';
+    html += `<div class="task-row" style="background:var(--surface2); border-radius:6px;" onclick="openTask('${t.id}')">
+      <span class="sprint-pill">${t.sprint_short}</span>
+      <span style="font-size:9px; padding:1px 5px; border-radius:3px; background:${sc}22; color:${sc}; font-weight:600; text-transform:uppercase;">${t.status}</span>
+      <span class="task-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+      <span style="font-size:10px; color:var(--text-muted);">${escapeHtml(asg)}</span>
+      <span class="task-days">${days}d</span>
+    </div>`;
   }
   html += `</div></div>`;
   return html;
@@ -616,7 +620,7 @@ function renderBacklog(tasks) {
 
 function renderKanban() {
   const tasks = filteredTasks();
-  let html = renderBacklog(tasks);
+  let html = renderBlocked(tasks);
   html += '<div class="kpis">';
   for (const d of DEVS) {
     const parents = devParents(d.id, tasks);
