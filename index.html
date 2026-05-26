@@ -726,46 +726,6 @@ function renderWeekly() {
   }
   html += `</div>`;
 
-  // BLOQUE SEPARADO: trabajo completado esta semana donde el dev quedó como watcher (no asignado actualmente)
-  // Solo cuenta tareas con status listo para qa / terminado actualizadas esta semana
-  const completedThisWeek = filteredTasks().filter(t => {
-    if (!inWeek(t)) return false;
-    return ['listo para qa','waiting qa','terminado','cerrado','done','closed'].includes(t.status);
-  });
-  let watcherSection = '';
-  let totalWatcher = 0;
-  for (const d of DEVS) {
-    const watched = completedThisWeek.filter(t => !t.assignees.includes(d.id) && (t.watchers||[]).includes(d.id));
-    if (!watched.length) continue;
-    totalWatcher += watched.length;
-    watcherSection += `<div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:12px; margin-top:12px;">
-      <div style="font-size:13px; font-weight:600; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
-        <div class="dev-avatar" style="width:24px;height:24px;font-size:10px;background:${d.color}">${d.short}</div>${d.name}
-        <span style="color:var(--text-muted); font-size:11px; margin-left:auto">${watched.length} completadas como watcher</span>
-      </div>`;
-    for (const t of watched) {
-      const c = STATUS_COLORS[t.status] || '#64748b';
-      watcherSection += `<div class="weekly-event" onclick="openTask('${t.id}')" style="margin-bottom:4px">
-        <span class="ev-status" style="background:${c}22; color:${c}">${t.status}</span>
-        <span class="sprint-pill">${t.sprint_short}</span>
-        <span style="font-size:9px; padding:1px 4px; border-radius:3px; background:#a855f7; color:white; font-weight:600">WATCHER</span>
-        <span class="task-name" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
-      </div>`;
-    }
-    watcherSection += `</div>`;
-  }
-  if (totalWatcher > 0) {
-    html += `<div class="weekly-section" style="margin-top:24px">
-      <h2 style="display:flex; align-items:center; gap:8px;">
-        <span style="color:#a855f7">●</span>
-        Trabajo completado esta semana como seguidor
-        <span style="font-size:11px; color:var(--text-muted); font-weight:400; margin-left:8px">
-          (tareas en Listo QA / Terminado que llegaron esta semana donde el dev quedó como watcher tras hacer el trabajo)
-        </span>
-      </h2>
-      ${watcherSection}
-    </div>`;
-  }
   return html;
 }
 
