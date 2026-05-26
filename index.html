@@ -433,7 +433,11 @@ function renderTotalizers() {
 
   const all = [...parents, ...subs];
   const allP = parents, allS = subs;
-  const inStep = (taskArr, stepKey) => taskArr.filter(t => FLOW.find(f => f.key === stepKey).statuses.includes(t.status));
+  const inStep = (taskArr, stepKey) => {
+    const f = FLOW.find(x => x.key === stepKey);
+    if (!f) return [];
+    return taskArr.filter(t => f.statuses.includes(t.status));
+  };
   const inDone = (taskArr) => taskArr.filter(t => DONE_STATUSES.includes(t.status));
 
   // Bloqueadas total (cualquier asignación)
