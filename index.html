@@ -48,7 +48,12 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
 .dev-header { padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
 .dev-avatar { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-weight:700; font-size:14px; }
 .dev-name { font-size:15px; font-weight:600; flex:1; }
-.dev-total { font-size:12px; color:var(--text-muted); }
+.dev-total { font-size:12px; color:var(--text-muted); display:flex; gap:6px; align-items:center; }
+.ps-chip { display:inline-flex; gap:4px; align-items:center; font-size:10px; padding:2px 6px; border-radius:4px; background:var(--bg); border:1px solid var(--border); font-weight:600; }
+.ps-chip .lbl { color:var(--text-muted); font-size:9px; }
+.ps-inline { display:inline-flex; gap:4px; margin-left:6px; }
+.ps-mini { font-size:10px; color:var(--text-muted); padding:1px 5px; border-radius:3px; background:var(--bg); font-weight:600; }
+.ps-mini b { color:var(--text); }
 
 .dev-flow { padding:10px; display:flex; flex-direction:column; gap:8px; }
 .flow-step { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
@@ -186,13 +191,13 @@ const DEVS = [
 
 // Aliases: incluye nombres en inglés (S1-S5) + español (S6)
 const FLOW = [
-  { key: 'pending', label: 'Reabierta / Pendiente', statuses: ['to do','a revisar','blocked','pendiente','reabiertas','bloqueado - rev. fun'], color: '#94a3b8' },
+  { key: 'pending', label: 'Reabierta / Pendiente', statuses: ['to do','a revisar','blocked','pendiente','reabiertas','bloqueado','bloqueado - rev. fun'], color: '#94a3b8' },
   { key: 'dev', label: 'En curso', statuses: ['in progress','en curso'], color: '#3b82f6' },
   { key: 'review_ready', label: 'Listo en revisión', statuses: ['review','listo para revision'], color: '#a855f7' },
   { key: 'review', label: 'En revisión', statuses: ['qa','en revision'], color: '#f59e0b' },
   { key: 'qa_ready', label: 'Listo QA', statuses: ['waiting qa','listo para qa'], color: '#22c55e' }
 ];
-const DONE_STATUSES = ['done','closed','automation','terminado'];
+const DONE_STATUSES = ['done','closed','automation','terminado','cerrado'];
 
 const STATUS_COLORS = {
   'to do':'#64748b','a revisar':'#94a3b8','blocked':'#ef4444','pendiente':'#64748b','reabiertas':'#ef4444','bloqueado - rev. fun':'#ef4444',
@@ -323,6 +328,17 @@ function tasksForDev(devId, tasks) {
   return (tasks || filteredTasks()).filter(t => t.assignees.includes(devId));
 }
 
+// Cuenta P (padres) y S (subtareas) en un array de tasks
+function countPS(tasks) {
+  let p=0, s=0;
+  for (const t of tasks) { if (t.parent) s++; else p++; }
+  return { p, s, total: p+s };
+}
+function psBadge(tasks) {
+  const c = countPS(tasks);
+  return `<span class="ps-inline"><span class="ps-mini"><span style="color:var(--text-muted)">P</span> <b>${c.p}</b></span><span class="ps-mini"><span style="color:var(--text-muted)">S</span> <b>${c.s}</b></span></span>`;
+}
+
 // Devuelve nodos { task, subtasks: [task,...] }
 // Si la subtarea está asignada al dev pero el padre no, el padre se incluye igual (placeholder) para dar contexto.
 function buildTree(devTasks) {
@@ -415,10 +431,16 @@ function renderKanban() {
   for (const d of DEVS) {
     const dt = tasksForDev(d.id, tasks);
     const inFlow = dt.filter(t => FLOW.some(f => f.statuses.includes(t.status)));
+    const cFlow = countPS(inFlow);
+    const cTot = countPS(dt);
     html += `<div class="kpi">
       <div class="label">${d.short} · ${d.name}</div>
-      <div class="value" style="color:${d.color}">${inFlow.length}</div>
-      <div class="sub">${dt.length} totales (vista actual)</div>
+      <div class="value" style="color:${d.color}">${cFlow.total}</div>
+      <div style="display:flex; gap:6px; margin-top:4px;">
+        <span class="ps-chip"><span class="lbl">P</span> ${cFlow.p}</span>
+        <span class="ps-chip"><span class="lbl">S</span> ${cFlow.s}</span>
+      </div>
+      <div class="sub" style="margin-top:6px">${cTot.total} totales · P ${cTot.p} / S ${cTot.s}</div>
     </div>`;
   }
   html += '</div>';
@@ -426,20 +448,26 @@ function renderKanban() {
   html += '<div class="devs-grid">';
   for (const d of DEVS) {
     const dt = tasksForDev(d.id, tasks);
+    const cAll = countPS(dt);
     html += `<div class="dev-card">
       <div class="dev-header">
         <div class="dev-avatar" style="background:${d.color}">${d.short}</div>
         <div class="dev-name">${d.name}</div>
-        <div class="dev-total">${dt.length}</div>
+        <div class="dev-total">${cAll.total} ${psBadge(dt)}</div>
       </div>
       <div class="dev-flow">`;
     for (const step of FLOW) {
       const stepTasks = dt.filter(t => step.statuses.includes(t.status));
       const nodes = buildTree(stepTasks);
+      const cs = countPS(stepTasks);
       html += `<div class="flow-step">
         <div class="flow-step-header" onclick="this.nextElementSibling.classList.toggle('open')">
           <div class="flow-step-name"><span class="status-dot" style="background:${step.color}"></span>${step.label}</div>
-          <div class="flow-step-count">${stepTasks.length}</div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <span class="ps-mini"><span style="color:var(--text-muted)">P</span> <b>${cs.p}</b></span>
+            <span class="ps-mini"><span style="color:var(--text-muted)">S</span> <b>${cs.s}</b></span>
+            <div class="flow-step-count">${cs.total}</div>
+          </div>
         </div>
         <div class="flow-tasks">`;
       if (nodes.length === 0) {
