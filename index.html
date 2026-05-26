@@ -153,6 +153,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
     <span class="last-updated" id="lastUpdated">—</span>
     <button class="btn" id="exportCsvBtn">Exportar CSV</button>
     <button class="btn" id="exportPdfBtn">Exportar PDF</button>
+    <button class="btn" id="resetHistBtn" title="Borra el historial local de asignaciones por dev">Reset historial</button>
     <button class="btn" id="refreshBtn">Actualizar</button>
   </div>
 </div>
@@ -254,6 +255,28 @@ function normStatus(s) {
 let SPRINTS = {}; // { list_id: { id, name, short } }
 let allTasks = [];
 let tasksById = {};
+// Historial de asignaciones: { task_id: [dev_id, dev_id, ...] } unión histórica
+let HIST = {};
+const HIST_KEY = 'panel-devs-assignment-history-v1';
+
+function loadHist() {
+  try { HIST = JSON.parse(localStorage.getItem(HIST_KEY) || '{}'); } catch (e) { HIST = {}; }
+}
+function saveHist() {
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(HIST)); } catch (e) {}
+}
+// Actualiza HIST con los assignees actuales de cada tarea (unión histórica)
+function updateHist(tasks) {
+  let changed = false;
+  for (const t of tasks) {
+    const devsHere = t.assignees.filter(a => DEV_IDS.includes(a));
+    if (!devsHere.length) continue;
+    const prev = HIST[t.id] || [];
+    const merged = Array.from(new Set([...prev, ...devsHere]));
+    if (merged.length !== prev.length) { HIST[t.id] = merged; changed = true; }
+  }
+  if (changed) saveHist();
+}
 let currentTab = 'kanban';
 let currentSprint = 'all';
 let currentView = 'active';
@@ -364,9 +387,29 @@ function filteredTasks() {
   });
 }
 
-// Padres asignados al dev (filtrados por sprint/vista)
+// IDs de todos los devs trackeados
+const DEV_IDS = DEVS.map(d => d.id);
+
+const WATCHER_OK_STATUSES = new Set(['listo para qa','waiting qa','terminado','done','cerrado','closed']);
+
+// ¿El dev participó/participa de la tarea?
+// 1. Asignado actualmente, O
+// 2. Estuvo asignado alguna vez (localStorage history), O
+// 3. Es watcher en una tarea POST-TRABAJO (Listo QA / Terminado) y ningún otro dev del set está asignado
+//    (típico: el dev hizo el PR, se quitó del asignado, quedó como watcher)
+function devParticipates(devId, t) {
+  if (t.assignees.includes(devId)) return true;
+  if ((HIST[t.id] || []).includes(devId)) return true;
+  if (WATCHER_OK_STATUSES.has(t.status)) {
+    const otherDevAssigned = t.assignees.some(a => DEV_IDS.includes(a) && a !== devId);
+    if (!otherDevAssigned && (t.watchers || []).includes(devId)) return true;
+  }
+  return false;
+}
+
+// Padres "de" un dev (asignado actual + historia + watcher si nadie del equipo asignado)
 function devParents(devId, tasks) {
-  return (tasks || filteredTasks()).filter(t => !t.parent && t.assignees.includes(devId));
+  return (tasks || filteredTasks()).filter(t => !t.parent && devParticipates(devId, t));
 }
 
 // Subtareas que viven DENTRO de los padres del dev (sin importar quién la tenga asignada)
@@ -1012,6 +1055,11 @@ document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () =>
 document.getElementById('sprintFilter').addEventListener('change', e => { currentSprint = e.target.value; render(); });
 document.getElementById('viewFilter').addEventListener('change', e => { currentView = e.target.value; render(); });
 document.getElementById('refreshBtn').addEventListener('click', () => init());
+document.getElementById('resetHistBtn').addEventListener('click', () => {
+  if (confirm('¿Borrar el historial local de asignaciones por dev? Esto quita atribuciones de tareas que ya no están asignadas a su dev original.')) {
+    HIST = {}; saveHist(); render();
+  }
+});
 document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
 document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
 
@@ -1045,12 +1093,14 @@ function rebuildSprintFilter() {
 
 async function init() {
   document.getElementById('content').innerHTML = '<div class="loading"><div class="spinner"></div>Cargando datos de ClickUp…</div>';
+  loadHist();
   SPRINTS = await discoverSprints();
   rebuildSprintFilter();
   allTasks = await fetchAllTasks();
   tasksById = {};
   for (const t of allTasks) tasksById[t.id] = t;
-  document.getElementById('lastUpdated').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-AR') + ` · ${Object.keys(SPRINTS).length} sprints · ${allTasks.length} tareas`;
+  updateHist(allTasks);
+  document.getElementById('lastUpdated').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-AR') + ` · ${Object.keys(SPRINTS).length} sprints · ${allTasks.length} tareas · ${Object.keys(HIST).length} en histórico`;
   document.getElementById('weekLabel').textContent = weekLabel(new Date());
   render();
 }
