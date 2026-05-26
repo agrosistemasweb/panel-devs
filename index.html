@@ -36,7 +36,8 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
 
 .content { padding:20px 24px; }
 
-.kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; margin-bottom:24px; }
+.kpis { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-bottom:24px; }
+@media (max-width:1100px) { .kpis { grid-template-columns:1fr; } }
 .kpi { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
 .kpi .label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
 .kpi .value { font-size:26px; font-weight:700; }
@@ -864,14 +865,15 @@ function renderKanban() {
     const parents = devParents(d.id, tasks);
     const parentsInFlow = parents.filter(t => FLOW.some(f => f.statuses.includes(t.status)));
     const c = countPS(parentsInFlow, tasks);
-    html += `<div class="kpi">
-      <div class="label">${d.short} · ${d.name}</div>
-      <div class="value" style="color:${d.color}">${c.p}</div>
-      <div style="display:flex; gap:6px; margin-top:4px;">
-        <span class="ps-chip"><span class="lbl">P</span> ${c.p}</span>
-        <span class="ps-chip"><span class="lbl">S</span> ${c.s}</span>
+    html += `<div class="tot-card" style="cursor:default" onclick="event.stopPropagation();">
+      <div class="tot-label"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${d.color}"></span>${d.short} · ${d.name}</div>
+      <div class="tot-row">
+        <div class="tot-value" style="color:${d.color}">${c.total}</div>
+        <div class="tot-ps">
+          <span><span class="lbl">P</span> <b>${c.p}</b></span>
+          <span><span class="lbl">S</span> <b>${c.s}</b></span>
+        </div>
       </div>
-      <div class="sub" style="margin-top:6px">${c.total} entre padres y subtareas</div>
     </div>`;
   }
   html += '</div>';
