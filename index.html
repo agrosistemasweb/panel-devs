@@ -258,7 +258,8 @@ let currentTab = 'kanban';
 let currentSprint = 'all';
 let currentView = 'active';
 let currentCutoff = null;
-let currentDrillBucket = null; // bucket key seleccionado al clickear un totalizador
+let currentDrillBucket = null;
+let selectedWeek = null; // start ms de la semana seleccionada en el historico
 
 // ============================================================
 // FETCH
@@ -870,13 +871,14 @@ function renderHistory() {
   for (const d of DEVS) html += `<div class="legend-item"><span class="legend-dot" style="background:${d.color}"></span>${d.name}</div>`;
   html += `</div><div class="chart-wrap"><div class="chart">`;
   for (const wd of dataByWeek) {
-    html += `<div class="week-col"><div class="week-bars">`;
+    const isSel = selectedWeek === wd.start;
+    html += `<div class="week-col" onclick="selectWeek(${wd.start})" style="cursor:pointer; ${isSel?'background:var(--surface2); border-radius:8px;':''}"><div class="week-bars">`;
     for (const d of DEVS) {
       const v = wd.perDev[d.id].moved;
       const h = (v/max) * 150;
       html += `<div class="week-bar" style="height:${h}px; background:${d.color}" title="${d.name}: ${v} movidas, ${wd.perDev[d.id].done} done"></div>`;
     }
-    html += `</div><div class="week-label ${wd.current?'current':''}">${wd.label}</div></div>`;
+    html += `</div><div class="week-label ${wd.current?'current':''}" style="${isSel?'color:var(--accent); font-weight:700':''}">${wd.label}</div></div>`;
   }
   html += `</div></div>`;
 
@@ -889,7 +891,8 @@ function renderHistory() {
   html += `<th style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border)">Total</th></tr></thead><tbody>`;
   for (const wd of [...dataByWeek].reverse()) {
     let total = 0;
-    html += `<tr><td style="padding:8px 10px; border-bottom:1px solid var(--border); ${wd.current?'color:var(--accent); font-weight:600':''}">${wd.label}${wd.current?' (actual)':''}</td>`;
+    const isSel = selectedWeek === wd.start;
+    html += `<tr onclick="selectWeek(${wd.start})" style="cursor:pointer; ${isSel?'background:var(--surface2)':''}"><td style="padding:8px 10px; border-bottom:1px solid var(--border); ${wd.current?'color:var(--accent); font-weight:600':''} ${isSel?'color:var(--accent); font-weight:700':''}">${wd.label}${wd.current?' (actual)':''}</td>`;
     for (const d of DEVS) {
       const v = wd.perDev[d.id].done;
       total += v;
@@ -898,7 +901,52 @@ function renderHistory() {
     html += `<td style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border); font-weight:600">${total}</td></tr>`;
   }
   html += `</tbody></table></div></div>`;
+
+  // Detalle de la semana seleccionada
+  if (selectedWeek !== null) {
+    const wd = dataByWeek.find(w => w.start === selectedWeek);
+    if (wd) {
+      const end = wd.start + 7*86400000;
+      html += `<div class="weekly-section" style="margin-top:20px">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+          <h2 style="font-size:15px; margin:0;">Detalle semana ${wd.label}${wd.current?' (actual)':''}</h2>
+          <button class="btn" style="margin-left:auto" onclick="selectWeek(null)">✕ Limpiar selección</button>
+        </div>
+        <div class="weekly-detail">`;
+      for (const d of DEVS) {
+        const dt = tasksForDev(d.id, tasks).filter(t => t.date_updated >= wd.start && t.date_updated < end).sort((a,b)=>b.date_updated-a.date_updated);
+        const doneInWeek = dt.filter(t => {
+          const close = t.date_closed || t.date_done;
+          return close && close >= wd.start && close < end;
+        }).length;
+        html += `<div class="weekly-dev">
+          <div class="weekly-dev-header">
+            <div class="dev-avatar" style="width:24px;height:24px;font-size:10px;background:${d.color}">${d.short}</div>${d.name}
+            <span style="color:var(--text-muted); font-size:11px; margin-left:auto">${dt.length} mov · ${doneInWeek} done</span>
+          </div>
+          <div class="weekly-events">`;
+        if (!dt.length) html += `<div class="empty" style="padding:20px 0">Sin movimientos</div>`;
+        for (const t of dt) {
+          const c = STATUS_COLORS[t.status] || '#64748b';
+          const parentInfo = t.parent && tasksById[t.parent] ? ` · ↑ ${escapeHtml(tasksById[t.parent].name.slice(0,40))}` : '';
+          html += `<div class="weekly-event" onclick="openTask('${t.id}')">
+            <span class="ev-status" style="background:${c}22; color:${c}">${t.status}</span>
+            <span class="sprint-pill">${t.sprint_short}</span>
+            <span class="task-name" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(t.name)}${parentInfo}">${escapeHtml(t.name)}${parentInfo}</span>
+          </div>`;
+        }
+        html += `</div></div>`;
+      }
+      html += `</div></div>`;
+    }
+  }
+
   return html;
+}
+
+function selectWeek(start) {
+  selectedWeek = (selectedWeek === start) ? null : start;
+  render();
 }
 
 // ============================================================
