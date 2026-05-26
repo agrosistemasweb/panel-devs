@@ -121,6 +121,26 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
 .meta-value { font-size:13px; }
 .modal-link { display:inline-block; margin-top:8px; color:var(--accent); text-decoration:none; font-size:13px; }
 .modal-link:hover { text-decoration:underline; }
+
+/* Big totalizers (estilo panel-modulo-contable) */
+.totalizers { display:grid; grid-template-columns:repeat(6, 1fr); gap:12px; padding:16px 24px 0; }
+@media (max-width:1200px) { .totalizers { grid-template-columns:repeat(3, 1fr); } }
+@media (max-width:700px) { .totalizers { grid-template-columns:repeat(2, 1fr); } }
+.tot-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; }
+.tot-card .tot-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+.tot-card .tot-value { font-size:34px; font-weight:800; line-height:1; }
+.tot-card .tot-ps { display:flex; gap:6px; margin-top:10px; }
+.tot-card .tot-ps span { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:11px; font-weight:600; display:flex; gap:4px; align-items:center; flex:1; justify-content:space-between; }
+.tot-card .tot-ps .lbl { color:var(--text-muted); }
+.progress-bar { display:flex; height:10px; border-radius:5px; overflow:hidden; margin:16px 24px 0; background:var(--surface2); border:1px solid var(--border); }
+.progress-seg { display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600; color:white; transition:width .3s; }
+
+/* Date filter bar */
+.date-bar { padding:12px 24px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.date-bar input[type="date"] { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:13px; font-family:inherit; }
+.date-bar .btn-quick { padding:6px 12px; font-size:12px; }
+.date-bar .btn-quick.active { background:var(--accent); border-color:var(--accent); color:white; }
+.export-group { margin-left:auto; display:flex; gap:6px; }
 </style>
 </head>
 <body>
@@ -129,9 +149,15 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
   <h1>Panel Devs <span class="badge" id="weekLabel">Sem actual</span></h1>
   <div class="header-actions">
     <span class="last-updated" id="lastUpdated">—</span>
+    <button class="btn" id="exportCsvBtn">Exportar CSV</button>
+    <button class="btn" id="exportPdfBtn">Exportar PDF</button>
     <button class="btn" id="refreshBtn">Actualizar</button>
   </div>
 </div>
+
+<!-- Totalizadores grandes ancho completo -->
+<div class="totalizers" id="totalizers"></div>
+<div class="progress-bar" id="progressBar"></div>
 
 <div class="filters">
   <label>Sprint:</label>
@@ -144,6 +170,16 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
     <option value="active">Activas (sin done/closed)</option>
     <option value="all">Todas</option>
   </select>
+</div>
+
+<!-- Barra de filtro de fecha (corte hasta) -->
+<div class="date-bar">
+  <label style="font-size:12px; color:var(--text-muted)">📅 Corte hasta:</label>
+  <input type="date" id="cutoffInput">
+  <button class="btn btn-quick" data-cutoff="today">Hoy</button>
+  <button class="btn btn-quick" data-cutoff="7">Hace 7 días</button>
+  <button class="btn btn-quick" data-cutoff="30">Hace 30 días</button>
+  <button class="btn btn-quick active" data-cutoff="none">Sin corte</button>
 </div>
 
 <div class="tabs">
@@ -222,6 +258,7 @@ let tasksById = {};
 let currentTab = 'kanban';
 let currentSprint = 'all';
 let currentView = 'active';
+let currentCutoff = null; // timestamp ms o null
 
 // ============================================================
 // FETCH
@@ -320,6 +357,7 @@ function filteredTasks() {
   return allTasks.filter(t => {
     if (currentSprint !== 'all' && t.list_id !== currentSprint) return false;
     if (currentView === 'active' && DONE_STATUSES.includes(t.status)) return false;
+    if (currentCutoff && t.date_created && t.date_created > currentCutoff) return false;
     return true;
   });
 }
@@ -352,39 +390,15 @@ function tasksForDev(devId, tasks) {
   return (tasks || filteredTasks()).filter(t => t.assignees.includes(devId));
 }
 
-// Devuelve nodos { task, subtasks: [task,...] }
-// Si la subtarea está asignada al dev pero el padre no, el padre se incluye igual (placeholder) para dar contexto.
-function buildTree(devTasks) {
-  const seen = new Set();
+// Construye nodos { task, subtasks } a partir de SOLO padres (descartando cualquier
+// subtarea que se haya colado). Las subtareas del padre se traen de allTasks
+// respetando vista activa.
+function buildTree(parentsOnly) {
   const nodes = [];
-  // Padres en devTasks
-  for (const t of devTasks) {
-    if (!t.parent) { nodes.push({ task: t, subtasks: [] }); seen.add(t.id); }
-  }
-  // Subtareas: meter bajo su padre o crear nodo huérfano
-  for (const t of devTasks) {
-    if (t.parent) {
-      let parentNode = nodes.find(n => n.task.id === t.parent);
-      if (!parentNode) {
-        const parentTask = tasksById[t.parent];
-        if (parentTask) {
-          parentNode = { task: parentTask, subtasks: [], parentNotAssigned: true };
-          nodes.push(parentNode);
-        } else {
-          parentNode = { task: { id: t.parent, name: '(padre no cargado)', status:'', assignees:[], sprint_short:'?' }, subtasks: [], parentNotAssigned: true };
-          nodes.push(parentNode);
-        }
-      }
-      parentNode.subtasks.push(t);
-    }
-  }
-  // Para padres que están en devTasks, agregar también sus subtareas (estén o no asignadas al dev) para contexto completo
-  for (const node of nodes) {
-    if (node.parentNotAssigned) continue;
-    const subs = allTasks.filter(x => x.parent === node.task.id);
-    for (const s of subs) {
-      if (!node.subtasks.find(ss => ss.id === s.id)) node.subtasks.push(s);
-    }
+  for (const t of parentsOnly) {
+    if (t.parent) continue; // safety: nunca aceptar subtareas
+    const subs = allTasks.filter(x => x.parent === t.id && (currentView !== 'active' || !DONE_STATUSES.includes(x.status)));
+    nodes.push({ task: t, subtasks: subs });
   }
   return nodes;
 }
@@ -393,10 +407,117 @@ function buildTree(devTasks) {
 // RENDER
 // ============================================================
 function render() {
+  renderTotalizers();
   const c = document.getElementById('content');
   if (currentTab === 'kanban') c.innerHTML = renderKanban();
   else if (currentTab === 'weekly') c.innerHTML = renderWeekly();
   else if (currentTab === 'history') c.innerHTML = renderHistory();
+}
+
+// ============================================================
+// TOTALIZADORES GRANDES (estilo panel-modulo-contable)
+// ============================================================
+function renderTotalizers() {
+  const tasks = filteredTasks();
+  // Para totalizadores: incluyo tareas asociadas a los 3 devs (padres asignados + subtareas dentro de esos padres)
+  let allParents = [];
+  for (const d of DEVS) allParents = allParents.concat(devParents(d.id, tasks));
+  // únicos
+  const seen = new Set(); const parents = [];
+  for (const p of allParents) if (!seen.has(p.id)) { seen.add(p.id); parents.push(p); }
+  const subs = devSubs(parents, tasks);
+
+  const all = [...parents, ...subs];
+  const allP = parents, allS = subs;
+  const inStep = (taskArr, stepKey) => taskArr.filter(t => FLOW.find(f => f.key === stepKey).statuses.includes(t.status));
+  const inDone = (taskArr) => taskArr.filter(t => DONE_STATUSES.includes(t.status));
+
+  // 5 buckets
+  const buckets = [
+    { key:'all', label:'Total trabajo', color:'#e4e6ef', filter:t=>true },
+    { key:'pending', label:'Por hacer', color:'#94a3b8' },
+    { key:'dev', label:'En curso', color:'#3b82f6' },
+    { key:'review_ready', label:'Listo en revisión', color:'#a855f7' },
+    { key:'review', label:'En revisión', color:'#f59e0b' },
+    { key:'qa_ready', label:'Listo QA', color:'#22c55e' }
+  ];
+
+  let html = '';
+  for (const b of buckets) {
+    let p, s;
+    if (b.key === 'all') { p = allP.length; s = allS.length; }
+    else {
+      p = inStep(allP, b.key).length;
+      s = inStep(allS, b.key).length;
+    }
+    const total = p + s;
+    html += `<div class="tot-card">
+      <div class="tot-label"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${b.color}"></span>${b.label}</div>
+      <div class="tot-value" style="color:${b.color}">${total}</div>
+      <div class="tot-ps">
+        <span><span class="lbl">P</span> <b>${p}</b></span>
+        <span><span class="lbl">S</span> <b>${s}</b></span>
+      </div>
+    </div>`;
+  }
+  document.getElementById('totalizers').innerHTML = html;
+
+  // progress bar (proporción por bucket de flujo)
+  const segs = buckets.slice(1).map(b => {
+    const c = inStep(allP, b.key).length + inStep(allS, b.key).length;
+    return { color: b.color, label: b.label, count: c };
+  });
+  const totalSeg = segs.reduce((a,b)=>a+b.count, 0);
+  const pb = document.getElementById('progressBar');
+  if (totalSeg > 0) {
+    pb.style.display = 'flex';
+    pb.innerHTML = segs.map(s => s.count>0 ? `<div class="progress-seg" style="width:${(s.count/totalSeg*100)}%; background:${s.color}" title="${s.label}: ${s.count}">${s.count}</div>` : '').join('');
+  } else { pb.style.display = 'none'; }
+}
+
+// ============================================================
+// EXPORTAR
+// ============================================================
+function buildExportRows() {
+  const tasks = filteredTasks();
+  const rows = [['Dev','Sprint','Tipo','Estado','Tarea','Padre','Asignados','Creada','Última actualización','URL']];
+  for (const d of DEVS) {
+    const parents = devParents(d.id, tasks);
+    const subs = devSubs(parents, tasks);
+    for (const t of [...parents, ...subs]) {
+      const parentName = t.parent && tasksById[t.parent] ? tasksById[t.parent].name : '';
+      rows.push([
+        d.name,
+        t.sprint_short,
+        t.parent ? 'Subtarea' : 'Padre',
+        t.status,
+        t.name,
+        parentName,
+        (t.assignee_names||[]).join('; '),
+        t.date_created ? new Date(t.date_created).toLocaleDateString('es-AR') : '',
+        t.date_updated ? new Date(t.date_updated).toLocaleString('es-AR') : '',
+        t.url
+      ]);
+    }
+  }
+  return rows;
+}
+
+function exportCsv() {
+  const rows = buildExportRows();
+  const csv = rows.map(r => r.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿'+csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `panel-devs-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportPdf() {
+  // Usa window.print (el navegador permite "Guardar como PDF")
+  window.print();
 }
 
 function renderTaskNode(node, devId) {
@@ -404,10 +525,9 @@ function renderTaskNode(node, devId) {
   const days = t.date_updated ? Math.floor((Date.now() - t.date_updated)/86400000) : '?';
   const hasSubs = node.subtasks.length > 0;
   const sc = STATUS_COLORS[t.status] || '#64748b';
-  const parentDim = node.parentNotAssigned ? 'opacity:.55;' : '';
 
   let h = `<div class="task-group">`;
-  h += `<div class="task-row task-parent" style="${parentDim}" onclick="toggleSubs(this, event, '${t.id}')">`;
+  h += `<div class="task-row task-parent" onclick="toggleSubs(this, event, '${t.id}')">`;
   h += `<span class="toggle">${hasSubs ? '▶' : '·'}</span>`;
   h += `<span class="sprint-pill">${t.sprint_short}</span>`;
   if (t.status) h += `<span class="status-pill" style="background:${sc}22; color:${sc}; padding:1px 5px; border-radius:3px; font-size:9px; font-weight:600; text-transform:uppercase;">${t.status}</span>`;
@@ -668,6 +788,24 @@ document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () =>
 document.getElementById('sprintFilter').addEventListener('change', e => { currentSprint = e.target.value; render(); });
 document.getElementById('viewFilter').addEventListener('change', e => { currentView = e.target.value; render(); });
 document.getElementById('refreshBtn').addEventListener('click', () => init());
+document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
+
+document.querySelectorAll('.btn-quick').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.btn-quick').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  const v = b.dataset.cutoff;
+  const today = new Date(); today.setHours(23,59,59,999);
+  if (v === 'none') { currentCutoff = null; document.getElementById('cutoffInput').value = ''; }
+  else if (v === 'today') { currentCutoff = today.getTime(); document.getElementById('cutoffInput').value = today.toISOString().slice(0,10); }
+  else { const d = new Date(); d.setDate(d.getDate() - parseInt(v)); d.setHours(23,59,59,999); currentCutoff = d.getTime(); document.getElementById('cutoffInput').value = d.toISOString().slice(0,10); }
+  render();
+}));
+document.getElementById('cutoffInput').addEventListener('change', e => {
+  if (!e.target.value) { currentCutoff = null; document.querySelectorAll('.btn-quick').forEach(x => x.classList.remove('active')); document.querySelector('[data-cutoff="none"]').classList.add('active'); }
+  else { const d = new Date(e.target.value); d.setHours(23,59,59,999); currentCutoff = d.getTime(); document.querySelectorAll('.btn-quick').forEach(x => x.classList.remove('active')); }
+  render();
+});
 document.getElementById('modalClose').addEventListener('click', closeModal);
 document.getElementById('modalOverlay').addEventListener('click', e => { if (e.target.id==='modalOverlay') closeModal(); });
 
