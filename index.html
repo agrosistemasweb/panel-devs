@@ -291,7 +291,11 @@ async function saveHist() {
   } catch (e) { console.warn('No se pudo guardar histórico KV:', e); }
 }
 
-// Snapshot: registra tareas asignadas a Mati/Tiago/Nacho con date_updated >= anchor (medimos a partir del anchor)
+// Snapshot: registra tareas relacionadas a Mati/Tiago/Nacho con date_updated en la semana actual y >= anchor
+// Dos fuentes válidas:
+//   1) Asignado actualmente al dev
+//   2) Tarea en Listo QA/Terminado donde el dev está en watchers Y ningún otro dev del set está asignado
+//      (típico: el dev hizo el PR, se quitó del asignado, quedó como seguidor)
 function snapshotThisWeek(tasks) {
   const anchor = STATE.anchor_ms || Date.now();
   const wk = weekKeyOf(new Date());
@@ -299,11 +303,22 @@ function snapshotThisWeek(tasks) {
   let changed = false;
   for (const t of tasks) {
     const upd = t.date_updated || 0;
-    if (upd < anchor) continue; // no medimos lo previo al anchor
+    if (upd < anchor) continue;
     const wkOfTask = weekKeyOf(new Date(upd));
-    if (wkOfTask !== wk) continue; // solo registramos en la semana en curso
-    const devsHere = t.assignees.filter(a => DEV_IDS.includes(a));
-    if (!devsHere.length) continue;
+    if (wkOfTask !== wk) continue;
+
+    const devsHere = new Set(t.assignees.filter(a => DEV_IDS.includes(a)));
+    // Watchers en estado post-trabajo
+    if (QA_STATUSES.has(t.status)) {
+      const otherDevAssigned = t.assignees.some(a => DEV_IDS.includes(a));
+      if (!otherDevAssigned) {
+        for (const w of (t.watchers || [])) {
+          if (DEV_IDS.includes(w)) devsHere.add(w);
+        }
+      }
+    }
+    if (!devsHere.size) continue;
+
     const prev = STATE.weeks[wk][t.id];
     const prevDevs = prev?.devs || [];
     const merged = Array.from(new Set([...prevDevs, ...devsHere]));
