@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel Devs - Avance Semanal</title>
+<style>
+:root {
+  --bg:#0f1117; --surface:#1a1d27; --surface2:#242736; --border:#2e3244;
+  --text:#e4e6ef; --text-muted:#8b8fa3;
+  --accent:#6366f1; --accent-hover:#818cf8;
+  --success:#22c55e; --warning:#f59e0b; --danger:#ef4444; --info:#3b82f6;
+  --mati:#8b5cf6; --tiago:#06b6d4; --nacho:#f59e0b;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+
+.header { background:var(--surface); border-bottom:1px solid var(--border); padding:16px 24px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:100; }
+.header h1 { font-size:20px; font-weight:600; display:flex; align-items:center; gap:10px; }
+.header h1 .badge { background:var(--accent); color:white; font-size:12px; padding:2px 10px; border-radius:12px; font-weight:500; }
+.header-actions { display:flex; gap:10px; align-items:center; }
+.btn { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; transition:all .2s; }
+.btn:hover { background:var(--border); }
+.btn.active { background:var(--accent); border-color:var(--accent); color:white; }
+.last-updated { font-size:12px; color:var(--text-muted); }
+
+.filters { padding:12px 24px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; border-bottom:1px solid var(--border); }
+.filters label { font-size:12px; color:var(--text-muted); font-weight:500; }
+.filter-select { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:6px 12px; border-radius:6px; font-size:13px; outline:none; }
+
+.tabs { display:flex; gap:4px; padding:12px 24px 0; border-bottom:1px solid var(--border); }
+.tab { padding:10px 18px; background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:13px; font-weight:500; border-bottom:2px solid transparent; transition:all .2s; }
+.tab:hover { color:var(--text); }
+.tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+.content { padding:20px 24px; }
+
+.kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; margin-bottom:24px; }
+.kpi { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+.kpi .label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+.kpi .value { font-size:26px; font-weight:700; }
+.kpi .sub { font-size:11px; color:var(--text-muted); margin-top:4px; }
+
+.devs-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
+@media (max-width:1200px) { .devs-grid { grid-template-columns:1fr; } }
+
+.dev-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+.dev-header { padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+.dev-avatar { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-weight:700; font-size:14px; }
+.dev-name { font-size:15px; font-weight:600; flex:1; }
+.dev-total { font-size:12px; color:var(--text-muted); }
+
+.dev-flow { padding:10px; display:flex; flex-direction:column; gap:8px; }
+.flow-step { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+.flow-step-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; cursor:pointer; user-select:none; }
+.flow-step-name { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); display:flex; align-items:center; gap:6px; }
+.flow-step-count { font-size:14px; font-weight:700; color:var(--text); background:var(--bg); padding:2px 10px; border-radius:10px; }
+.status-dot { width:8px; height:8px; border-radius:50%; }
+.flow-tasks { display:none; flex-direction:column; gap:4px; margin-top:6px; }
+.flow-tasks.open { display:flex; }
+
+.task-group { background:var(--bg); border-radius:6px; overflow:hidden; }
+.task-row { padding:6px 8px; font-size:12px; cursor:pointer; display:flex; gap:6px; align-items:center; transition:background .15s; }
+.task-row:hover { background:var(--border); }
+.task-row .sprint-pill { font-size:9px; padding:1px 5px; border-radius:3px; background:var(--surface2); color:var(--text-muted); text-transform:uppercase; }
+.task-row .task-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.task-row .task-days { font-size:10px; color:var(--text-muted); }
+.task-parent { font-weight:600; }
+.task-parent .toggle { font-size:10px; color:var(--text-muted); width:12px; }
+.subtask-list { display:none; flex-direction:column; padding-left:18px; border-left:2px solid var(--surface2); margin-left:6px; }
+.subtask-list.open { display:flex; }
+.subtask-row { padding:5px 8px; font-size:11.5px; cursor:pointer; display:flex; gap:6px; align-items:center; }
+.subtask-row:hover { background:var(--border); }
+.subtask-row .status-pill { font-size:9px; padding:1px 4px; border-radius:3px; text-transform:uppercase; font-weight:600; }
+.assignee-mini { display:inline-flex; align-items:center; gap:3px; font-size:10px; }
+.assignee-mini .dot { width:8px; height:8px; border-radius:50%; }
+
+/* Weekly chart */
+.weekly-section { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px; margin-top:20px; }
+.weekly-section h2 { font-size:15px; font-weight:600; margin-bottom:14px; }
+.chart-wrap { overflow-x:auto; }
+.chart { display:flex; gap:12px; align-items:flex-end; min-height:200px; padding:10px 0; }
+.week-col { display:flex; flex-direction:column; align-items:center; gap:4px; min-width:80px; }
+.week-bars { display:flex; gap:3px; align-items:flex-end; height:160px; }
+.week-bar { width:14px; border-radius:3px 3px 0 0; transition:opacity .2s; cursor:pointer; min-height:2px; }
+.week-bar:hover { opacity:.7; }
+.week-label { font-size:10px; color:var(--text-muted); text-align:center; }
+.week-label.current { color:var(--accent); font-weight:600; }
+.chart-legend { display:flex; gap:14px; margin-bottom:10px; flex-wrap:wrap; }
+.legend-item { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-muted); }
+.legend-dot { width:10px; height:10px; border-radius:2px; }
+
+.weekly-detail { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:14px; }
+@media (max-width:1200px) { .weekly-detail { grid-template-columns:1fr; } }
+.weekly-dev { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:12px; }
+.weekly-dev-header { font-size:13px; font-weight:600; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+.weekly-events { display:flex; flex-direction:column; gap:5px; max-height:320px; overflow-y:auto; }
+.weekly-event { padding:6px 8px; background:var(--bg); border-radius:5px; font-size:11px; display:flex; gap:6px; align-items:center; cursor:pointer; }
+.weekly-event:hover { background:var(--border); }
+.ev-status { padding:1px 6px; border-radius:3px; font-size:9px; font-weight:600; text-transform:uppercase; white-space:nowrap; }
+
+.empty { padding:30px 20px; text-align:center; color:var(--text-muted); font-size:13px; }
+.loading { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:80px 20px; color:var(--text-muted); }
+.spinner { width:40px; height:40px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; margin-bottom:16px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1000; justify-content:center; align-items:flex-start; padding:40px 20px; overflow-y:auto; }
+.modal-overlay.active { display:flex; }
+.modal { background:var(--surface); border:1px solid var(--border); border-radius:16px; width:100%; max-width:720px; max-height:85vh; overflow-y:auto; }
+.modal-header { padding:18px 22px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:flex-start; }
+.modal-header h2 { font-size:16px; font-weight:600; line-height:1.4; flex:1; padding-right:16px; }
+.modal-close { background:none; border:none; color:var(--text-muted); font-size:24px; cursor:pointer; padding:4px; line-height:1; }
+.modal-body { padding:18px 22px; }
+.modal-meta { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
+.meta-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px; }
+.meta-value { font-size:13px; }
+.modal-link { display:inline-block; margin-top:8px; color:var(--accent); text-decoration:none; font-size:13px; }
+.modal-link:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Panel Devs <span class="badge" id="weekLabel">Sem actual</span></h1>
+  <div class="header-actions">
+    <span class="last-updated" id="lastUpdated">—</span>
+    <button class="btn" id="refreshBtn">Actualizar</button>
+  </div>
+</div>
+
+<div class="filters">
+  <label>Sprint:</label>
+  <select class="filter-select" id="sprintFilter">
+    <option value="all">Todos los sprints</option>
+  </select>
+
+  <label style="margin-left:14px;">Vista:</label>
+  <select class="filter-select" id="viewFilter">
+    <option value="active">Activas (sin done/closed)</option>
+    <option value="all">Todas</option>
+  </select>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="kanban">Estado actual</button>
+  <button class="tab" data-tab="weekly">Esta semana</button>
+  <button class="tab" data-tab="history">Histórico semanal</button>
+</div>
+
+<div class="content" id="content">
+  <div class="loading"><div class="spinner"></div>Cargando datos de ClickUp…</div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">—</h2>
+      <button class="modal-close" id="modalClose">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const PROXY = 'https://panel-bugs-proxy.lorena-ruiz-e63.workers.dev';
+const SPRINT_FOLDER_ID = '901316203875';
+
+// Fallback hardcodeado por si el endpoint del folder no está deployado todavía
+const FALLBACK_SPRINTS = {
+  '901323690606': 'Sprint 1',
+  '901324230121': 'Sprint 2',
+  '901324539845': 'Sprint 3',
+  '901325316130': 'Sprint 4',
+  '901326731539': 'Sprint 5',
+  '901327168887': 'Sprint 6'
+};
+
+const DEVS = [
+  { id: 90708484, name: 'Matías Fluctum', color: 'var(--mati)', hex: '#8b5cf6', short: 'MF' },
+  { id: 120292638, name: 'Tiago Roccatagliata', color: 'var(--tiago)', hex: '#06b6d4', short: 'TR' },
+  { id: 82053721, name: 'Ignacio Martín', color: 'var(--nacho)', hex: '#f59e0b', short: 'IM' }
+];
+
+const FLOW = [
+  { key: 'pending', label: 'Reabierta / Pendiente', statuses: ['to do','a revisar','blocked'], color: '#94a3b8' },
+  { key: 'dev', label: 'En curso', statuses: ['in progress'], color: '#3b82f6' },
+  { key: 'review_ready', label: 'Listo en revisión', statuses: ['review'], color: '#a855f7' },
+  { key: 'review', label: 'En revisión', statuses: ['qa'], color: '#f59e0b' },
+  { key: 'qa_ready', label: 'Listo QA', statuses: ['waiting qa'], color: '#22c55e' }
+];
+const DONE_STATUSES = ['done','closed','automation'];
+
+const STATUS_COLORS = {
+  'to do':'#64748b','a revisar':'#94a3b8','blocked':'#ef4444',
+  'in progress':'#3b82f6','review':'#a855f7','qa':'#f59e0b',
+  'waiting qa':'#22c55e','done':'#10b981','closed':'#10b981','automation':'#06b6d4'
+};
+
+// ============================================================
+// STATE
+// ============================================================
+let SPRINTS = {}; // { list_id: { id, name, short } }
+let allTasks = [];
+let tasksById = {};
+let currentTab = 'kanban';
+let currentSprint = 'all';
+let currentView = 'active';
+
+// ============================================================
+// FETCH
+// ============================================================
+async function discoverSprints() {
+  try {
+    const r = await fetch(`${PROXY}/api/folder/${SPRINT_FOLDER_ID}/list`);
+    const data = await r.json();
+    if (data.lists && data.lists.length) {
+      const result = {};
+      // Ordenar por nombre para que S1, S2... salga prolijo
+      const sorted = data.lists.filter(l => !l.archived).sort((a,b) => {
+        const na = parseInt((a.name.match(/\d+/) || ['0'])[0]);
+        const nb = parseInt((b.name.match(/\d+/) || ['0'])[0]);
+        return na - nb;
+      });
+      for (const l of sorted) {
+        const numMatch = l.name.match(/\d+/);
+        const short = numMatch ? `S${numMatch[0]}` : l.name.slice(0,6);
+        result[l.id] = { id: l.id, name: l.name, short };
+      }
+      return result;
+    }
+  } catch (e) { console.warn('Folder endpoint no disponible, uso fallback:', e); }
+
+  // Fallback
+  const result = {};
+  for (const [id, name] of Object.entries(FALLBACK_SPRINTS)) {
+    const numMatch = name.match(/\d+/);
+    const short = numMatch ? `S${numMatch[0]}` : name.slice(0,6);
+    result[id] = { id, name: `${name} Modulo Contable`, short };
+  }
+  return result;
+}
+
+async function fetchAllTasks() {
+  const tasks = [];
+  for (const listId of Object.keys(SPRINTS)) {
+    let page = 0;
+    while (page < 20) {
+      try {
+        const r = await fetch(`${PROXY}/api/tasks?list_id=${listId}&page=${page}&include_closed=true&subtasks=true`);
+        const data = await r.json();
+        const batch = data.tasks || [];
+        if (!batch.length) break;
+        for (const t of batch) tasks.push(normalizeTask(t, listId));
+        if (batch.length < 100) break;
+        page++;
+      } catch (e) { console.error('Error fetching', listId, page, e); break; }
+    }
+  }
+  return tasks;
+}
+
+function normalizeTask(t, listId) {
+  return {
+    id: t.id,
+    name: t.name,
+    status: (t.status?.status || '').toLowerCase(),
+    assignees: (t.assignees || []).map(a => a.id),
+    assignee_names: (t.assignees || []).map(a => a.username),
+    list_id: listId,
+    sprint_short: SPRINTS[listId]?.short || '?',
+    sprint_name: SPRINTS[listId]?.name || '?',
+    date_created: parseInt(t.date_created || 0),
+    date_updated: parseInt(t.date_updated || 0),
+    date_closed: parseInt(t.date_closed || 0),
+    date_done: parseInt(t.date_done || 0),
+    url: t.url || `https://app.clickup.com/t/${t.id}`,
+    parent: t.parent || null
+  };
+}
+
+// ============================================================
+// WEEK HELPERS
+// ============================================================
+function startOfWeek(d) {
+  const dt = new Date(d);
+  const day = dt.getDay();
+  const diff = (day === 0 ? -6 : 1 - day);
+  dt.setDate(dt.getDate() + diff);
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+function weekLabel(d) {
+  const s = startOfWeek(d);
+  const e = new Date(s); e.setDate(e.getDate()+6);
+  const fmt = x => `${String(x.getDate()).padStart(2,'0')}/${String(x.getMonth()+1).padStart(2,'0')}`;
+  return `${fmt(s)}–${fmt(e)}`;
+}
+
+// ============================================================
+// FILTER + AGRUPADO PADRE/SUBTAREAS
+// ============================================================
+function filteredTasks() {
+  return allTasks.filter(t => {
+    if (currentSprint !== 'all' && t.list_id !== currentSprint) return false;
+    if (currentView === 'active' && DONE_STATUSES.includes(t.status)) return false;
+    return true;
+  });
+}
+
+function tasksForDev(devId, tasks) {
+  return (tasks || filteredTasks()).filter(t => t.assignees.includes(devId));
+}
+
+// Devuelve nodos { task, subtasks: [task,...] }
+// Si la subtarea está asignada al dev pero el padre no, el padre se incluye igual (placeholder) para dar contexto.
+function buildTree(devTasks) {
+  const seen = new Set();
+  const nodes = [];
+  // Padres en devTasks
+  for (const t of devTasks) {
+    if (!t.parent) { nodes.push({ task: t, subtasks: [] }); seen.add(t.id); }
+  }
+  // Subtareas: meter bajo su padre o crear nodo huérfano
+  for (const t of devTasks) {
+    if (t.parent) {
+      let parentNode = nodes.find(n => n.task.id === t.parent);
+      if (!parentNode) {
+        const parentTask = tasksById[t.parent];
+        if (parentTask) {
+          parentNode = { task: parentTask, subtasks: [], parentNotAssigned: true };
+          nodes.push(parentNode);
+        } else {
+          parentNode = { task: { id: t.parent, name: '(padre no cargado)', status:'', assignees:[], sprint_short:'?' }, subtasks: [], parentNotAssigned: true };
+          nodes.push(parentNode);
+        }
+      }
+      parentNode.subtasks.push(t);
+    }
+  }
+  // Para padres que están en devTasks, agregar también sus subtareas (estén o no asignadas al dev) para contexto completo
+  for (const node of nodes) {
+    if (node.parentNotAssigned) continue;
+    const subs = allTasks.filter(x => x.parent === node.task.id);
+    for (const s of subs) {
+      if (!node.subtasks.find(ss => ss.id === s.id)) node.subtasks.push(s);
+    }
+  }
+  return nodes;
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function render() {
+  const c = document.getElementById('content');
+  if (currentTab === 'kanban') c.innerHTML = renderKanban();
+  else if (currentTab === 'weekly') c.innerHTML = renderWeekly();
+  else if (currentTab === 'history') c.innerHTML = renderHistory();
+}
+
+function renderTaskNode(node, devId) {
+  const t = node.task;
+  const days = t.date_updated ? Math.floor((Date.now() - t.date_updated)/86400000) : '?';
+  const hasSubs = node.subtasks.length > 0;
+  const sc = STATUS_COLORS[t.status] || '#64748b';
+  const parentDim = node.parentNotAssigned ? 'opacity:.55;' : '';
+
+  let h = `<div class="task-group">`;
+  h += `<div class="task-row task-parent" style="${parentDim}" onclick="toggleSubs(this, event, '${t.id}')">`;
+  h += `<span class="toggle">${hasSubs ? '▶' : '·'}</span>`;
+  h += `<span class="sprint-pill">${t.sprint_short}</span>`;
+  if (t.status) h += `<span class="status-pill" style="background:${sc}22; color:${sc}; padding:1px 5px; border-radius:3px; font-size:9px; font-weight:600; text-transform:uppercase;">${t.status}</span>`;
+  h += `<span class="task-name" title="${escapeHtml(t.name)}" onclick="event.stopPropagation(); openTask('${t.id}')">${escapeHtml(t.name)}</span>`;
+  if (t.date_updated) h += `<span class="task-days">${days}d</span>`;
+  h += `</div>`;
+
+  if (hasSubs) {
+    h += `<div class="subtask-list" id="subs-${t.id}">`;
+    for (const st of node.subtasks) {
+      const ssc = STATUS_COLORS[st.status] || '#64748b';
+      const sdays = st.date_updated ? Math.floor((Date.now() - st.date_updated)/86400000) : '?';
+      const assigneeChips = st.assignees.map(aid => {
+        const dev = DEVS.find(d => d.id === aid);
+        return dev ? `<span class="assignee-mini" title="${dev.name}"><span class="dot" style="background:${dev.hex}"></span>${dev.short}</span>` : '';
+      }).filter(Boolean).join(' ');
+      h += `<div class="subtask-row" onclick="openTask('${st.id}')">`;
+      h += `<span style="color:var(--text-muted)">└</span>`;
+      h += `<span class="status-pill" style="background:${ssc}22; color:${ssc}">${st.status}</span>`;
+      h += `<span class="task-name" title="${escapeHtml(st.name)}">${escapeHtml(st.name)}</span>`;
+      if (assigneeChips) h += assigneeChips;
+      h += `<span class="task-days">${sdays}d</span>`;
+      h += `</div>`;
+    }
+    h += `</div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
+function renderKanban() {
+  const tasks = filteredTasks();
+  let html = '<div class="kpis">';
+  for (const d of DEVS) {
+    const dt = tasksForDev(d.id, tasks);
+    const inFlow = dt.filter(t => FLOW.some(f => f.statuses.includes(t.status)));
+    html += `<div class="kpi">
+      <div class="label">${d.short} · ${d.name}</div>
+      <div class="value" style="color:${d.color}">${inFlow.length}</div>
+      <div class="sub">${dt.length} totales (vista actual)</div>
+    </div>`;
+  }
+  html += '</div>';
+
+  html += '<div class="devs-grid">';
+  for (const d of DEVS) {
+    const dt = tasksForDev(d.id, tasks);
+    html += `<div class="dev-card">
+      <div class="dev-header">
+        <div class="dev-avatar" style="background:${d.color}">${d.short}</div>
+        <div class="dev-name">${d.name}</div>
+        <div class="dev-total">${dt.length}</div>
+      </div>
+      <div class="dev-flow">`;
+    for (const step of FLOW) {
+      const stepTasks = dt.filter(t => step.statuses.includes(t.status));
+      const nodes = buildTree(stepTasks);
+      html += `<div class="flow-step">
+        <div class="flow-step-header" onclick="this.nextElementSibling.classList.toggle('open')">
+          <div class="flow-step-name"><span class="status-dot" style="background:${step.color}"></span>${step.label}</div>
+          <div class="flow-step-count">${stepTasks.length}</div>
+        </div>
+        <div class="flow-tasks">`;
+      if (nodes.length === 0) {
+        html += `<div style="font-size:11px; color:var(--text-muted); padding:4px;">Sin tareas</div>`;
+      } else {
+        for (const n of nodes) html += renderTaskNode(n, d.id);
+      }
+      html += `</div></div>`;
+    }
+    html += `</div></div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderWeekly() {
+  const start = startOfWeek(new Date()).getTime();
+  const end = start + 7*86400000;
+  const inWeek = t => t.date_updated >= start && t.date_updated < end;
+  const tasks = filteredTasks().filter(inWeek);
+
+  let html = `<div class="kpis">`;
+  for (const d of DEVS) {
+    const dt = tasksForDev(d.id, tasks);
+    const done = dt.filter(t => DONE_STATUSES.includes(t.status) || (t.date_closed && t.date_closed >= start));
+    const toQa = dt.filter(t => t.status === 'waiting qa');
+    html += `<div class="kpi">
+      <div class="label">${d.name}</div>
+      <div class="value" style="color:${d.color}">${dt.length}</div>
+      <div class="sub">${toQa.length} listas QA · ${done.length} done</div>
+    </div>`;
+  }
+  html += `</div>`;
+
+  html += `<div class="weekly-detail">`;
+  for (const d of DEVS) {
+    const dt = tasksForDev(d.id, tasks).sort((a,b) => b.date_updated - a.date_updated);
+    html += `<div class="weekly-dev">
+      <div class="weekly-dev-header"><div class="dev-avatar" style="width:24px;height:24px;font-size:10px;background:${d.color}">${d.short}</div>${d.name} <span style="color:var(--text-muted); font-size:11px; margin-left:auto">${dt.length} mov.</span></div>
+      <div class="weekly-events">`;
+    if (dt.length === 0) html += `<div class="empty" style="padding:20px 0">Sin movimientos</div>`;
+    for (const t of dt) {
+      const c = STATUS_COLORS[t.status] || '#64748b';
+      const parentInfo = t.parent && tasksById[t.parent] ? ` · ↑ ${escapeHtml(tasksById[t.parent].name.slice(0,40))}` : '';
+      html += `<div class="weekly-event" onclick="openTask('${t.id}')">
+        <span class="ev-status" style="background:${c}22; color:${c}">${t.status}</span>
+        <span class="sprint-pill">${t.sprint_short}</span>
+        <span class="task-name" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(t.name)}${parentInfo}">${escapeHtml(t.name)}${parentInfo}</span>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function renderHistory() {
+  const today = new Date();
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i*7);
+    const s = startOfWeek(d);
+    weeks.push({ start: s.getTime(), label: weekLabel(s), current: i===0 });
+  }
+  const tasks = filteredTasks();
+
+  const dataByWeek = weeks.map(w => {
+    const end = w.start + 7*86400000;
+    const perDev = {};
+    for (const d of DEVS) {
+      const dt = tasksForDev(d.id, tasks);
+      const moved = dt.filter(t => t.date_updated >= w.start && t.date_updated < end);
+      const done = dt.filter(t => {
+        const close = t.date_closed || t.date_done;
+        return close && close >= w.start && close < end;
+      });
+      perDev[d.id] = { moved: moved.length, done: done.length };
+    }
+    return { ...w, perDev };
+  });
+
+  let max = 1;
+  for (const wd of dataByWeek) for (const d of DEVS) max = Math.max(max, wd.perDev[d.id].moved);
+
+  let html = `<div class="weekly-section">
+    <h2>Histórico semanal — tareas movidas (date_updated)</h2>
+    <div class="chart-legend">`;
+  for (const d of DEVS) html += `<div class="legend-item"><span class="legend-dot" style="background:${d.color}"></span>${d.name}</div>`;
+  html += `</div><div class="chart-wrap"><div class="chart">`;
+  for (const wd of dataByWeek) {
+    html += `<div class="week-col"><div class="week-bars">`;
+    for (const d of DEVS) {
+      const v = wd.perDev[d.id].moved;
+      const h = (v/max) * 150;
+      html += `<div class="week-bar" style="height:${h}px; background:${d.color}" title="${d.name}: ${v} movidas, ${wd.perDev[d.id].done} done"></div>`;
+    }
+    html += `</div><div class="week-label ${wd.current?'current':''}">${wd.label}</div></div>`;
+  }
+  html += `</div></div>`;
+
+  html += `<h2 style="margin-top:24px">Tareas finalizadas (done/closed) por semana</h2>
+    <div style="overflow-x:auto; margin-top:10px;">
+    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+    <thead><tr style="background:var(--surface2)">
+      <th style="text-align:left; padding:8px 10px; border-bottom:1px solid var(--border)">Semana</th>`;
+  for (const d of DEVS) html += `<th style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border); color:${d.color}">${d.short}</th>`;
+  html += `<th style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border)">Total</th></tr></thead><tbody>`;
+  for (const wd of [...dataByWeek].reverse()) {
+    let total = 0;
+    html += `<tr><td style="padding:8px 10px; border-bottom:1px solid var(--border); ${wd.current?'color:var(--accent); font-weight:600':''}">${wd.label}${wd.current?' (actual)':''}</td>`;
+    for (const d of DEVS) {
+      const v = wd.perDev[d.id].done;
+      total += v;
+      html += `<td style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border)">${v||'·'}</td>`;
+    }
+    html += `<td style="text-align:center; padding:8px 10px; border-bottom:1px solid var(--border); font-weight:600">${total||'·'}</td></tr>`;
+  }
+  html += `</tbody></table></div></div>`;
+  return html;
+}
+
+// ============================================================
+// INTERACTION
+// ============================================================
+function toggleSubs(el, event, taskId) {
+  if (event.target.classList.contains('task-name')) return;
+  const subs = document.getElementById('subs-' + taskId);
+  if (!subs) return;
+  subs.classList.toggle('open');
+  const t = el.querySelector('.toggle');
+  if (t && t.textContent !== '·') t.textContent = subs.classList.contains('open') ? '▼' : '▶';
+}
+
+async function openTask(taskId) {
+  const t = tasksById[taskId] || allTasks.find(x => x.id === taskId);
+  if (!t) return;
+  const modal = document.getElementById('modalOverlay');
+  document.getElementById('modalTitle').textContent = t.name;
+  const assignees = t.assignee_names && t.assignee_names.length ? t.assignee_names.join(', ') : '—';
+  const parent = t.parent && tasksById[t.parent] ? `<a class="modal-link" href="${tasksById[t.parent].url}" target="_blank">${escapeHtml(tasksById[t.parent].name)} ↗</a>` : '—';
+  const subs = allTasks.filter(x => x.parent === t.id);
+  let subsHtml = '';
+  if (subs.length) {
+    subsHtml = `<div style="margin-top:14px"><div class="meta-label">Subtareas (${subs.length})</div>`;
+    for (const s of subs) {
+      const sc = STATUS_COLORS[s.status] || '#64748b';
+      subsHtml += `<div style="padding:6px 0; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center; font-size:12px;">
+        <span class="ev-status" style="background:${sc}22; color:${sc}">${s.status}</span>
+        <a href="${s.url}" target="_blank" style="color:var(--text); text-decoration:none; flex:1">${escapeHtml(s.name)}</a>
+        <span style="color:var(--text-muted); font-size:11px">${(s.assignee_names||[]).join(', ')}</span>
+      </div>`;
+    }
+    subsHtml += `</div>`;
+  }
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-meta">
+      <div><div class="meta-label">Estado</div><div class="meta-value"><span class="ev-status" style="padding:3px 8px; border-radius:4px; background:${(STATUS_COLORS[t.status]||'#64748b')}33; color:${STATUS_COLORS[t.status]||'#64748b'}">${t.status||'—'}</span></div></div>
+      <div><div class="meta-label">Sprint</div><div class="meta-value">${t.sprint_short} — ${escapeHtml(t.sprint_name||'')}</div></div>
+      <div><div class="meta-label">Asignados</div><div class="meta-value">${assignees}</div></div>
+      <div><div class="meta-label">Padre</div><div class="meta-value">${parent}</div></div>
+      <div><div class="meta-label">Creada</div><div class="meta-value">${t.date_created? new Date(t.date_created).toLocaleDateString('es-AR'):'—'}</div></div>
+      <div><div class="meta-label">Última actualización</div><div class="meta-value">${t.date_updated? new Date(t.date_updated).toLocaleString('es-AR'):'—'}</div></div>
+      <div><div class="meta-label">Cerrada</div><div class="meta-value">${t.date_closed? new Date(t.date_closed).toLocaleDateString('es-AR'):'—'}</div></div>
+    </div>
+    <a class="modal-link" href="${t.url}" target="_blank">Abrir en ClickUp ↗</a>
+    ${subsHtml}
+  `;
+  modal.classList.add('active');
+}
+function closeModal() { document.getElementById('modalOverlay').classList.remove('active'); }
+
+function escapeHtml(s) {
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  currentTab = b.dataset.tab;
+  render();
+}));
+document.getElementById('sprintFilter').addEventListener('change', e => { currentSprint = e.target.value; render(); });
+document.getElementById('viewFilter').addEventListener('change', e => { currentView = e.target.value; render(); });
+document.getElementById('refreshBtn').addEventListener('click', () => init());
+document.getElementById('modalClose').addEventListener('click', closeModal);
+document.getElementById('modalOverlay').addEventListener('click', e => { if (e.target.id==='modalOverlay') closeModal(); });
+
+function rebuildSprintFilter() {
+  const sel = document.getElementById('sprintFilter');
+  sel.innerHTML = '<option value="all">Todos los sprints</option>';
+  for (const [id, s] of Object.entries(SPRINTS)) {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = `${s.short} — ${s.name}`;
+    sel.appendChild(opt);
+  }
+}
+
+async function init() {
+  document.getElementById('content').innerHTML = '<div class="loading"><div class="spinner"></div>Cargando datos de ClickUp…</div>';
+  SPRINTS = await discoverSprints();
+  rebuildSprintFilter();
+  allTasks = await fetchAllTasks();
+  tasksById = {};
+  for (const t of allTasks) tasksById[t.id] = t;
+  document.getElementById('lastUpdated').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-AR') + ` · ${Object.keys(SPRINTS).length} sprints · ${allTasks.length} tareas`;
+  document.getElementById('weekLabel').textContent = weekLabel(new Date());
+  render();
+}
+
+init();
+setInterval(init, 5*60*1000);
+</script>
+</body>
+</html>
