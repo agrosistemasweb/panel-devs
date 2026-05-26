@@ -184,20 +184,29 @@ const DEVS = [
   { id: 82053721, name: 'Ignacio Martín', color: 'var(--nacho)', hex: '#f59e0b', short: 'IM' }
 ];
 
+// Aliases: incluye nombres en inglés (S1-S5) + español (S6)
 const FLOW = [
-  { key: 'pending', label: 'Reabierta / Pendiente', statuses: ['to do','a revisar','blocked'], color: '#94a3b8' },
-  { key: 'dev', label: 'En curso', statuses: ['in progress'], color: '#3b82f6' },
-  { key: 'review_ready', label: 'Listo en revisión', statuses: ['review'], color: '#a855f7' },
-  { key: 'review', label: 'En revisión', statuses: ['qa'], color: '#f59e0b' },
-  { key: 'qa_ready', label: 'Listo QA', statuses: ['waiting qa'], color: '#22c55e' }
+  { key: 'pending', label: 'Reabierta / Pendiente', statuses: ['to do','a revisar','blocked','pendiente','reabiertas','bloqueado - rev. fun'], color: '#94a3b8' },
+  { key: 'dev', label: 'En curso', statuses: ['in progress','en curso'], color: '#3b82f6' },
+  { key: 'review_ready', label: 'Listo en revisión', statuses: ['review','listo para revision'], color: '#a855f7' },
+  { key: 'review', label: 'En revisión', statuses: ['qa','en revision'], color: '#f59e0b' },
+  { key: 'qa_ready', label: 'Listo QA', statuses: ['waiting qa','listo para qa'], color: '#22c55e' }
 ];
-const DONE_STATUSES = ['done','closed','automation'];
+const DONE_STATUSES = ['done','closed','automation','terminado'];
 
 const STATUS_COLORS = {
-  'to do':'#64748b','a revisar':'#94a3b8','blocked':'#ef4444',
-  'in progress':'#3b82f6','review':'#a855f7','qa':'#f59e0b',
-  'waiting qa':'#22c55e','done':'#10b981','closed':'#10b981','automation':'#06b6d4'
+  'to do':'#64748b','a revisar':'#94a3b8','blocked':'#ef4444','pendiente':'#64748b','reabiertas':'#ef4444','bloqueado - rev. fun':'#ef4444',
+  'in progress':'#3b82f6','en curso':'#3b82f6',
+  'review':'#a855f7','listo para revision':'#a855f7',
+  'qa':'#f59e0b','en revision':'#f59e0b',
+  'waiting qa':'#22c55e','listo para qa':'#22c55e',
+  'done':'#10b981','closed':'#10b981','automation':'#06b6d4','terminado':'#10b981'
 };
+
+// Normaliza: lowercase + colapsa espacios múltiples (ClickUp S6 tiene "listo  para qa" con doble espacio)
+function normStatus(s) {
+  return String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+}
 
 // ============================================================
 // STATE
@@ -266,7 +275,7 @@ function normalizeTask(t, listId) {
   return {
     id: t.id,
     name: t.name,
-    status: (t.status?.status || '').toLowerCase(),
+    status: normStatus(t.status?.status),
     assignees: (t.assignees || []).map(a => a.id),
     assignee_names: (t.assignees || []).map(a => a.username),
     list_id: listId,
