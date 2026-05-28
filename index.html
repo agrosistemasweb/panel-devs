@@ -921,12 +921,14 @@ function renderKanban() {
           const parentTask = tasksById[s.parent];
           const parentStatus = parentTask ? parentTask.status : '?';
           const psc = STATUS_COLORS[parentStatus] || '#64748b';
+          const parentDiffers = parentTask && parentStatus !== s.status;
           html += `<div class="task-row" style="background:var(--bg); border-radius:6px; margin-bottom:4px;" onclick="openTask('${s.id}')">
             <span style="color:var(--text-muted)">└</span>
             <span class="sprint-pill">${s.sprint_short}</span>
-            <span class="status-pill" style="background:${ssc}22; color:${ssc}; padding:1px 5px; border-radius:3px; font-size:9px; font-weight:600; text-transform:uppercase;">${s.status}</span>
+            ${parentDiffers
+              ? `<span class="status-pill" title="Status del padre: ${escapeHtml(parentTask.name)}" style="background:${psc}22; color:${psc}; padding:1px 5px; border-radius:3px; font-size:9px; font-weight:600; text-transform:uppercase;">${escapeHtml(parentStatus)}</span>`
+              : `<span class="status-pill" style="background:${ssc}22; color:${ssc}; padding:1px 5px; border-radius:3px; font-size:9px; font-weight:600; text-transform:uppercase;">${s.status}</span>`}
             <span class="task-name" title="${escapeHtml(s.name)}${parentTask ? ' · padre: ' + escapeHtml(parentTask.name) : ''}">${escapeHtml(s.name)}</span>
-            ${parentTask ? `<span title="Padre: ${escapeHtml(parentTask.name)} (${escapeHtml(parentStatus)})" style="font-size:9px; padding:1px 5px; border-radius:3px; background:${psc}22; color:${psc}; font-weight:600;">↑ ${escapeHtml(parentStatus)}</span>` : ''}
             <span class="task-days">${sdays}d</span>
           </div>`;
         }
