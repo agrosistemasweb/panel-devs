@@ -423,6 +423,30 @@ async function fetchAllTasks() {
   return tasks;
 }
 
+// Custom Field "Desarrollador" en ClickUp (dropdown). Cuando esta seleccionado,
+// es la autoridad absoluta sobre quien desarrollo la tarea (cubre handoff a QA
+// y casos donde un no-dev desarrolla pero un dev aprueba el PR).
+const DEVELOPER_FIELD_ID = '0699a940-1f60-4063-b264-abd27cb5aac3';
+const DEVELOPER_OPTION_TO_DEV = {
+  'Matias': 90708484,
+  'Tiago': 120292638,
+  'Ignacio': 82053721
+};
+
+function extractDeveloper(t) {
+  const cf = (t.custom_fields || []).find(f => f.id === DEVELOPER_FIELD_ID);
+  if (!cf) return null;
+  const val = cf.value;
+  if (val === null || val === undefined) return null;
+  const opts = cf.type_config?.options || [];
+  // value puede venir como orderindex (int) o como option id (string)
+  let opt = null;
+  if (typeof val === 'number') opt = opts.find(o => o.orderindex === val);
+  else if (typeof val === 'string') opt = opts.find(o => o.id === val);
+  if (!opt) return null;
+  return DEVELOPER_OPTION_TO_DEV[opt.name] || null;
+}
+
 function normalizeTask(t, listId) {
   return {
     id: t.id,
@@ -439,7 +463,8 @@ function normalizeTask(t, listId) {
     date_closed: parseInt(t.date_closed || 0),
     date_done: parseInt(t.date_done || 0),
     url: t.url || `https://app.clickup.com/t/${t.id}`,
-    parent: t.parent || null
+    parent: t.parent || null,
+    developer_id: extractDeveloper(t)
   };
 }
 
@@ -489,6 +514,8 @@ function devParents(devId, tasks) {
   const td = (STATE && STATE.task_developer) || {};
   return (tasks || filteredTasks()).filter(t => {
     if (t.parent) return false;
+    // Custom Field "Desarrollador" es autoridad absoluta si esta seteado
+    if (t.developer_id) return t.developer_id === devId;
     if (t.assignees.includes(devId)) return true;
     if (WATCHER_OK_STATUSES.has(t.status)) {
       const otherDevAssigned = t.assignees.some(a => DEV_IDS.includes(a) && a !== devId);
