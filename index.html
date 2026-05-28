@@ -264,7 +264,12 @@ let tasksById = {};
 //   anchor_ms: timestamp de cuando se activó el tracking (medimos a partir de aquí),
 //   weeks: { "2026-05-25": { task_id: { devs:[...], first_seen_ms, last_status } }, ... }
 // }
-let STATE = { anchor_ms: null, weeks: {} };
+// task_developer: { task_id: dev_id } — dev que estuvo asignado mientras la tarea
+// estaba en "en curso". Fuente de verdad para atribuir tareas que después pasan
+// a revisión/QA y se reasignan. Persiste en KV; solo se actualiza cuando la tarea
+// está en estado "en curso" con un dev asignado.
+let STATE = { anchor_ms: null, weeks: {}, task_developer: {} };
+const IN_PROGRESS_STATUSES = new Set(['in progress','en curso']);
 
 function weekKeyOf(d) {
   const s = startOfWeek(d);
@@ -276,7 +281,7 @@ async function loadHist() {
     const r = await fetch(`${PROXY}/api/state/devs_weekly_hist`);
     const data = await r.json();
     if (data && typeof data === 'object') {
-      STATE = { anchor_ms: data.anchor_ms || null, weeks: data.weeks || {} };
+      STATE = { anchor_ms: data.anchor_ms || null, weeks: data.weeks || {}, task_developer: data.task_developer || {} };
     }
   } catch (e) { console.warn('No se pudo cargar histórico KV:', e); }
   // Si nunca se inicializó, anchor = ahora
@@ -304,10 +309,22 @@ function snapshotThisWeek(tasks) {
   const anchor = STATE.anchor_ms || Date.now();
   const wk = weekKeyOf(new Date());
   if (!STATE.weeks[wk]) STATE.weeks[wk] = {};
+  if (!STATE.task_developer) STATE.task_developer = {};
   let changed = false;
   for (const t of tasks) {
     const upd = t.date_updated || 0;
     if (upd < anchor) continue;
+
+    // task_developer: capturar dev asignado mientras la tarea está en "en curso".
+    // Esa atribución queda fija; cuando la tarea avance a revisión/QA, no se sobrescribe.
+    if (IN_PROGRESS_STATUSES.has(t.status)) {
+      const devAssigned = t.assignees.find(a => DEV_IDS.includes(a));
+      if (devAssigned && STATE.task_developer[t.id] !== devAssigned) {
+        STATE.task_developer[t.id] = devAssigned;
+        changed = true;
+      }
+    }
+
     const wkOfTask = weekKeyOf(new Date(upd));
     if (wkOfTask !== wk) continue;
 
@@ -465,17 +482,18 @@ const DEV_IDS = DEVS.map(d => d.id);
 
 const WATCHER_OK_STATUSES = new Set(['listo para qa','waiting qa','terminado','done','cerrado','closed']);
 
-// Conteo del kanban: assignees actuales + watcher fallback solo en estados QA/done
-// (caso: dev trabajó la tarea, paso a Listo QA y se reasignó a Lorena; se le agrega
-// como seguidor al dev en ClickUp para que el panel lo atribuya).
+// Conteo del kanban: assignees actuales + task_developer como autoridad cuando
+// la tarea está en QA/done y nadie del set figura. task_developer registra al
+// dev que tuvo la tarea en "en curso", que es quien la desarrolló (no el revisor).
 function devParents(devId, tasks) {
+  const td = (STATE && STATE.task_developer) || {};
   return (tasks || filteredTasks()).filter(t => {
     if (t.parent) return false;
     if (t.assignees.includes(devId)) return true;
     if (WATCHER_OK_STATUSES.has(t.status)) {
       const otherDevAssigned = t.assignees.some(a => DEV_IDS.includes(a) && a !== devId);
       if (otherDevAssigned) return false;
-      if ((t.watchers || []).includes(devId)) return true;
+      if (td[t.id] === devId) return true;
     }
     return false;
   });
@@ -1175,7 +1193,7 @@ document.getElementById('viewFilter').addEventListener('change', e => { currentV
 document.getElementById('refreshBtn').addEventListener('click', () => init());
 document.getElementById('resetHistBtn').addEventListener('click', async () => {
   if (confirm('¿Reiniciar el tracking? Borra los snapshots semanales y vuelve a empezar a medir desde HOY en adelante.')) {
-    STATE = { anchor_ms: Date.now(), weeks: {} };
+    STATE = { anchor_ms: Date.now(), weeks: {}, task_developer: {} };
     await saveHist();
     render();
   }
