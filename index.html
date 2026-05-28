@@ -264,10 +264,7 @@ let tasksById = {};
 //   anchor_ms: timestamp de cuando se activó el tracking (medimos a partir de aquí),
 //   weeks: { "2026-05-25": { task_id: { devs:[...], first_seen_ms, last_status } }, ... }
 // }
-// task_workers: mapa permanente { task_id: [dev_ids que estuvieron asignados alguna vez] }
-// Persiste a Cloudflare KV; permite recordar al dev que trabajó la tarea aunque
-// despues sea reasignada al QA y deje de figurar como assignee.
-let STATE = { anchor_ms: null, weeks: {}, task_workers: {} };
+let STATE = { anchor_ms: null, weeks: {} };
 
 function weekKeyOf(d) {
   const s = startOfWeek(d);
@@ -279,7 +276,7 @@ async function loadHist() {
     const r = await fetch(`${PROXY}/api/state/devs_weekly_hist`);
     const data = await r.json();
     if (data && typeof data === 'object') {
-      STATE = { anchor_ms: data.anchor_ms || null, weeks: data.weeks || {}, task_workers: data.task_workers || {} };
+      STATE = { anchor_ms: data.anchor_ms || null, weeks: data.weeks || {} };
     }
   } catch (e) { console.warn('No se pudo cargar histórico KV:', e); }
   // Si nunca se inicializó, anchor = ahora
@@ -307,24 +304,10 @@ function snapshotThisWeek(tasks) {
   const anchor = STATE.anchor_ms || Date.now();
   const wk = weekKeyOf(new Date());
   if (!STATE.weeks[wk]) STATE.weeks[wk] = {};
-  if (!STATE.task_workers) STATE.task_workers = {};
   let changed = false;
   for (const t of tasks) {
     const upd = t.date_updated || 0;
     if (upd < anchor) continue;
-
-    // task_workers: registro PERMANENTE de devs que pasaron por la tarea
-    // (vale para cualquier estado, no solo esta semana). Solo se acumula.
-    const devsAssigned = t.assignees.filter(a => DEV_IDS.includes(a));
-    if (devsAssigned.length) {
-      const prevW = STATE.task_workers[t.id] || [];
-      const mergedW = Array.from(new Set([...prevW, ...devsAssigned]));
-      if (mergedW.length !== prevW.length) {
-        STATE.task_workers[t.id] = mergedW;
-        changed = true;
-      }
-    }
-
     const wkOfTask = weekKeyOf(new Date(upd));
     if (wkOfTask !== wk) continue;
 
@@ -486,16 +469,14 @@ const WATCHER_OK_STATUSES = new Set(['listo para qa','waiting qa','terminado','d
 // cuando ningún otro dev del set quedó asignado. Esto evita perder tareas que
 // pasaron del dev al QA (Lorena) y dejaron de tener al dev como assignee.
 function devParents(devId, tasks) {
-  const workers = (STATE && STATE.task_workers) || {};
   return (tasks || filteredTasks()).filter(t => {
     if (t.parent) return false;
     if (t.assignees.includes(devId)) return true;
     if (WATCHER_OK_STATUSES.has(t.status)) {
       const otherDevAssigned = t.assignees.some(a => DEV_IDS.includes(a) && a !== devId);
       if (otherDevAssigned) return false;
-      // Fallback: dev quedó como watcher, o el snapshot registró que trabajó la tarea
       if ((t.watchers || []).includes(devId)) return true;
-      if ((workers[t.id] || []).includes(devId)) return true;
+      if (((typeof HIST !== 'undefined' ? HIST[t.id] : null) || []).includes(devId)) return true;
     }
     return false;
   });
@@ -1195,7 +1176,7 @@ document.getElementById('viewFilter').addEventListener('change', e => { currentV
 document.getElementById('refreshBtn').addEventListener('click', () => init());
 document.getElementById('resetHistBtn').addEventListener('click', async () => {
   if (confirm('¿Reiniciar el tracking? Borra los snapshots semanales y vuelve a empezar a medir desde HOY en adelante.')) {
-    STATE = { anchor_ms: Date.now(), weeks: {}, task_workers: {} };
+    STATE = { anchor_ms: Date.now(), weeks: {} };
     await saveHist();
     render();
   }
